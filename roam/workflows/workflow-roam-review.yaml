@@ -1,0 +1,71 @@
+id: 89adaf51-bbe1-4313-a94e-967a0c4d4a9d
+name: "@taylor/roam-review"
+description: Write a weekly summary of the Activities on Roam daily notes, or a monthly, quarterly or yearly rollup of the summaries below it, and publish it to the graph
+tags: {}
+inputs:
+  properties:
+    kind:
+      type: string
+      enum: [week, month, quarter, year]
+      description: "week: from daily-note Activities; month: from weeklies; quarter: from monthlies; year: from quarterlies"
+    date:
+      type: string
+      default: last
+      description: A YYYY-MM-DD day in the period, 'current', or 'last' (the most recent period that has ended)
+    ifExists:
+      type: string
+      enum: [skip, replace, fail]
+      default: skip
+      description: What to do when the graph already has this period's summary
+  required: [kind]
+vaults: [roam-secrets]
+jobs:
+  - name: review
+    description: Collect the source, write the summary, publish it
+    steps:
+      - name: collect
+        description: Gather the period's daily notes or child summaries and build the prompt
+        task:
+          type: model_method
+          modelIdOrName: roam
+          methodName: collect
+          inputs:
+            kind: ${{ inputs.kind }}
+            date: ${{ inputs.date }}
+        dependsOn: []
+        weight: 0
+        allowFailure: false
+      - name: summarise
+        description: Write the summary with Claude
+        task:
+          type: model_method
+          modelIdOrName: roam-summarizer
+          methodName: generate
+          inputs:
+            prompt: ${{ data.latest("roam", "source").attributes.prompt }}
+        dependsOn:
+          - step: collect
+            condition:
+              type: succeeded
+        weight: 0
+        allowFailure: false
+      - name: publish
+        description: Write the summary to the graph and store it as data
+        task:
+          type: model_method
+          modelIdOrName: roam
+          methodName: publish
+          inputs:
+            kind: ${{ data.latest("roam", "source").attributes.kind }}
+            key: ${{ data.latest("roam", "source").attributes.key }}
+            markdown: ${{ data.latest("roam-summarizer", "result").attributes.response }}
+            ifExists: ${{ inputs.ifExists }}
+        dependsOn:
+          - step: summarise
+            condition:
+              type: succeeded
+        weight: 0
+        allowFailure: false
+    dependsOn: []
+    weight: 0
+version: 1

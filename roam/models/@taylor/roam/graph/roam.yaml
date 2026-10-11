@@ -1,0 +1,10 @@
+type: '@taylor/roam/graph'
+typeVersion: 2026.10.11.1
+id: 2cf824b2-b9d4-463f-858c-11ad0c4bdf92
+name: roam
+version: 1
+tags: {}
+globalArguments:
+  token: '${{ vault.get("roam-secrets", "ROAM_API_TOKEN") }}'
+  graph: '${{ vault.get("roam-secrets", "ROAM_GRAPH") }}'
+methods: {}

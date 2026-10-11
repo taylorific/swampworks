@@ -1,0 +1,7 @@
+id: 9b00cd6a-935b-430d-9a84-d1ad208859da
+name: roam-secrets
+type: local_encryption
+config:
+  auto_generate: true
+  base_dir: /Users/taylor/github/taylorific/swampworks/roam
+createdAt: '2026-10-11T17:03:50.339Z'
