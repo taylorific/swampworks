@@ -721,3 +721,42 @@ Deno.test("push reports a rejected push", async () => {
     "Permission denied",
   );
 });
+
+// ---- build ----
+
+Deno.test("build runs slidev build through the image entrypoint", async () => {
+  const rt = new FakeRuntime();
+  rt.onRun = (args) => {
+    assertEquals(args.includes("--entrypoint"), false);
+    assertEquals(args.slice(-3), ["build", "--out", "/tmp/slidev-build"]);
+    return { stdout: "✓ built in 12.3s" };
+  };
+  const test = await run("build", await tempDeck(), rt);
+  const r = resource(test);
+  assertEquals(r.ok, true);
+  assertStringIncludes(String(r.log), "built in");
+});
+
+Deno.test("build fails with the build log", async () => {
+  const rt = new FakeRuntime();
+  rt.onRun = () => ({
+    code: 1,
+    stderr:
+      "Build failed with 1 error:\nSyntaxError: [lightningcss minify] Invalid token",
+  });
+  const dir = await tempDeck();
+  const e = await assertRejects(() => run("build", dir, rt), Error);
+  assertStringIncludes(e.message, "a Pages deploy would fail too");
+  assertStringIncludes(e.message, "lightningcss minify");
+});
+
+Deno.test("build fails when slidev reports a failure with exit 0", async () => {
+  const rt = new FakeRuntime();
+  rt.onRun = () => ({ stdout: "✗ Build failed in 2.1s" });
+  const dir = await tempDeck();
+  await assertRejects(
+    () => run("build", dir, rt),
+    Error,
+    "slidev build failed",
+  );
+});

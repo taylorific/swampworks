@@ -25,6 +25,7 @@ The `@taylor/slidev/deck` model type points at one deck directory:
 | `export`   | Export the deck to PDF                                                                                                                        |
 | `init`     | Create a new deck at `dir` from the Slidev template, with `playwright-chromium`                                                               |
 | `scaffold` | Add page numbers, a GitHub Pages deploy workflow, README, LICENSE and a starter `slides.md` to a deck from `init`, then `git init` and commit |
+| `build`    | Check the deck builds for production (`slidev build`), as a Pages deploy would; fails with the build log if it doesn't                        |
 | `push`     | Push the deck to a remote as `origin`, adding `origin` if it's missing                                                                        |
 
 `fit` and `export` drive the Chromium that the deck's `playwright-chromium`
@@ -80,7 +81,8 @@ buttons and `abs-br` boxes, are placed deliberately and are ignored.
 ### A new deck on GitHub
 
 The `@taylor/slidev-new-deck` workflow goes from nothing to a published deck:
-`init`, `scaffold`, then (with
+`init`, `scaffold`, `build` (so a deck that won't build stops here, before
+anything is created on GitHub), then (with
 [`@taylor/github`](https://swamp-club.com/extensions/@taylor/github) and
 [`@taylor/github-pages`](https://swamp-club.com/extensions/@taylor/github-pages),
 installed with this extension) create the GitHub repository, set Pages to build
@@ -135,6 +137,7 @@ rm --force slidev-<deck>                   # docker; Apple: delete --force
 run --rm ... --entrypoint npm <image> outdated --json
 run --rm ... --entrypoint npm <image> install --no-audit --no-fund <pkg>@latest ...
 run --rm ... --mount <tmp>:/out <image> export --output /out/slides.pdf
+run --rm ... <image> build --out /tmp/slidev-build   # build: output stays in the container
 run --rm ... --mount <parent>:/slidev --entrypoint bash <image> -c 'echo n | npm init slidev@latest --yes <name>'
 ```
 

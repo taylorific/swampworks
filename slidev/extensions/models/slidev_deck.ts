@@ -220,6 +220,14 @@ const UpgradeSchema = z.object({
   upgradedAt: z.string(),
 });
 
+const BuildSchema = z.object({
+  dir: z.string(),
+  ok: z.boolean(),
+  durationMs: z.number(),
+  log: z.string(),
+  builtAt: z.string(),
+});
+
 const ScaffoldSchema = z.object({
   dir: z.string(),
   files: z.array(z.string()),
@@ -520,7 +528,7 @@ export const model = {
     },
     {
       toVersion: "2026.10.11.3",
-      description: "Adds scaffold and push; no settings changed",
+      description: "Adds scaffold, build and push; no settings changed",
       upgradeAttributes: (old: Record<string, unknown>) => old,
     },
   ],
@@ -571,6 +579,12 @@ export const model = {
       schema: DeckSchema,
       lifetime: "infinite",
       garbageCollection: 3,
+    },
+    build: {
+      description: "The last production build check (instance build)",
+      schema: BuildSchema,
+      lifetime: "infinite",
+      garbageCollection: 10,
     },
     scaffold: {
       description:
@@ -933,6 +947,48 @@ export const model = {
           changes,
           skippedPinned,
           upgradedAt: new Date().toISOString(),
+        });
+        return { dataHandles: [handle] };
+      },
+    },
+
+    build: {
+      description:
+        "Check that the deck builds for production (slidev build), as a Pages deploy would; fails with the build log if it doesn't",
+      arguments: TimeoutArgsSchema.extend({
+        timeoutMs: z.number().int().positive().default(900000).describe(
+          "Timeout for the build, including a first-run npm install",
+        ),
+      }),
+      execute: async (
+        args: TimeoutArgs & TestHooks,
+        context: Context,
+      ) => {
+        const d = deck(context, args);
+        d.logger.info("Building {dir} for production", { dir: d.dir });
+        const started = Date.now();
+        // The output goes to the throwaway container's /tmp, so the deck
+        // directory is left as it was.
+        const res = await runOnce(d, "build", {
+          image: ["build", "--out", "/tmp/slidev-build"],
+        }, args.timeoutMs);
+        const log = tail(`${res.stdout}\n${res.stderr}`.trim(), 25);
+        const ok = res.code === 0 && !/Build failed/.test(log);
+        const durationMs = Date.now() - started;
+        if (!ok) {
+          throw new Error(
+            `slidev build failed (exit ${res.code}), so a Pages deploy would fail too:\n${log}`,
+          );
+        }
+        d.logger.info("Built in {s}s", {
+          s: Math.round(durationMs / 1000),
+        });
+        const handle = await context.writeResource("build", "build", {
+          dir: d.dir,
+          ok,
+          durationMs,
+          log,
+          builtAt: new Date().toISOString(),
         });
         return { dataHandles: [handle] };
       },

@@ -1,6 +1,6 @@
 id: d4bd5a13-75d2-4bf6-bdb9-b1834d5f99a4
 name: "@taylor/slidev-new-deck"
-description: Create a Slidev deck from the template, add page numbers, a Pages deploy workflow, README, LICENSE and a starter slides.md, create its GitHub repository, set Pages to build from GitHub Actions, and push it
+description: Create a Slidev deck from the template, add page numbers, a Pages deploy workflow, README, LICENSE and a starter slides.md, check it builds, create its GitHub repository, set Pages to build from GitHub Actions, and push it
 tags: {}
 inputs:
   properties:
@@ -81,6 +81,22 @@ jobs:
               type: succeeded
         weight: 0
         allowFailure: false
+      - name: build
+        description: Check the deck builds for production before anything is created on GitHub
+        task:
+          type: model_method
+          modelType: "@taylor/slidev/deck"
+          modelName: deck-${{ inputs.name }}
+          methodName: build
+          globalArgs:
+            dir: ${{ inputs.parentDir + "/" + inputs.name }}
+            runtime: ${{ inputs.runtime }}
+        dependsOn:
+          - step: scaffold
+            condition:
+              type: succeeded
+        weight: 0
+        allowFailure: false
       - name: repo
         description: Create the GitHub repository if it doesn't exist
         task:
@@ -95,7 +111,7 @@ jobs:
             description: ${{ inputs.description }}
             visibility: ${{ inputs.visibility }}
         dependsOn:
-          - step: scaffold
+          - step: build
             condition:
               type: succeeded
         weight: 0
