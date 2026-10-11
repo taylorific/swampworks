@@ -760,3 +760,93 @@ Deno.test("build fails when slidev reports a failure with exit 0", async () => {
     "slidev build failed",
   );
 });
+
+Deno.test("scaffold installs the lockfile from a deck that builds", async () => {
+  const good = await tempDeck({
+    name: "good-deck",
+    dependencies: { "@slidev/cli": "^53.0.0" },
+    devDependencies: { "playwright-chromium": "^1.63.0" },
+  });
+  Deno.writeTextFileSync(
+    `${good}/package-lock.json`,
+    JSON.stringify({
+      name: "good-deck",
+      lockfileVersion: 3,
+      packages: {
+        "": { name: "good-deck" },
+        "node_modules/vite": { version: "8.3.1" },
+      },
+    }),
+  );
+  const dir = await tempDeck({
+    name: "new-deck",
+    dependencies: { "@slidev/cli": "^53.0.0", "vue": "^3.5.0" },
+  });
+  const rt = new FakeRuntime();
+  const git = fakeGit();
+  const test = createModelTestContext({
+    globalArgs: model.globalArguments.parse({ dir }),
+    methodName: "scaffold",
+  });
+  await model.methods.scaffold.execute(
+    {
+      ...model.methods.scaffold.arguments.parse({
+        title: "Talk",
+        author: "Sam",
+        lockfileFrom: `${good}/`,
+      }),
+      _git: git.run,
+      _run: rt.run,
+    },
+    test.context as unknown as Ctx,
+  );
+  const pkg = JSON.parse(Deno.readTextFileSync(`${dir}/package.json`));
+  assertEquals(pkg.name, "new-deck");
+  assertEquals(pkg.dependencies, { "@slidev/cli": "^53.0.0" });
+  assertEquals(pkg.devDependencies, { "playwright-chromium": "^1.63.0" });
+  const lock = JSON.parse(Deno.readTextFileSync(`${dir}/package-lock.json`));
+  assertEquals([lock.name, lock.packages[""].name], ["new-deck", "new-deck"]);
+  assertEquals(lock.packages["node_modules/vite"].version, "8.3.1");
+  const [install] = rt.runs();
+  assertEquals(after(install, "--entrypoint"), "npm");
+  assertEquals(install.slice(-3), ["ci", "--no-audit", "--no-fund"]);
+  // Installed before the commit, so the lockfile is in the first commit.
+  assertEquals(git.calls[0].slice(2, 3), ["init"]);
+});
+
+Deno.test("scaffold rejects a lockfileFrom without a lockfile", async () => {
+  const good = await tempDeck();
+  const dir = await tempDeck();
+  await assertRejects(
+    () =>
+      runGit("scaffold", dir, fakeGit(), {
+        title: "Talk",
+        author: "Sam",
+        lockfileFrom: good,
+      }),
+    Error,
+    "needs a package.json and package-lock.json",
+  );
+});
+
+Deno.test("scaffold without lockfileFrom doesn't run npm", async () => {
+  const rt = new FakeRuntime();
+  const dir = await tempDeck();
+  const test = createModelTestContext({
+    globalArgs: model.globalArguments.parse({ dir }),
+    methodName: "scaffold",
+  });
+  await model.methods.scaffold.execute(
+    {
+      ...model.methods.scaffold.arguments.parse({
+        title: "Talk",
+        author: "Sam",
+        lockfileFrom: "",
+      }),
+      _git: fakeGit().run,
+      _run: rt.run,
+    },
+    test.context as unknown as Ctx,
+  );
+  assertEquals(rt.runs(), []);
+});

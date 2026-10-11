@@ -134,6 +134,12 @@ const ScaffoldArgsSchema = z.object({
   copyright: z.string().optional().describe(
     "Copyright holder for the first line of LICENSE",
   ),
+  lockfileFrom: z.string().optional().describe(
+    "Path of a deck that builds; its package-lock.json and dependency versions are copied in and installed with npm ci, to work around a broken upstream release",
+  ),
+  timeoutMs: z.number().int().positive().default(900000).describe(
+    "Timeout for npm ci when lockfileFrom is given",
+  ),
 });
 type ScaffoldArgs = z.infer<typeof ScaffoldArgsSchema>;
 
@@ -1056,6 +1062,8 @@ export const model = {
           );
         }
         d.logger.info("Creating a Slidev deck at {dir}", { dir: d.dir });
+        // The runtime can only mount a directory that exists.
+        await Deno.mkdir(parent, { recursive: true });
         const res = await runOnce(
           { ...d, dir: parent },
           "init",
@@ -1157,6 +1165,57 @@ export const model = {
             recursive: true,
           });
           await Deno.writeTextFile(full, content);
+        }
+
+        // Workflows pass unset inputs as "", so treat "" as not given.
+        if (args.lockfileFrom) {
+          const src = args.lockfileFrom.replace(/\/+$/, "");
+          let srcPkg: Record<string, unknown>;
+          let srcLock: Record<string, unknown>;
+          try {
+            srcPkg = JSON.parse(await Deno.readTextFile(`${src}/package.json`));
+            srcLock = JSON.parse(
+              await Deno.readTextFile(`${src}/package-lock.json`),
+            );
+          } catch {
+            throw new Error(
+              `lockfileFrom ${src} needs a package.json and package-lock.json`,
+            );
+          }
+          const pkgPath = `${d.dir}/package.json`;
+          const pkg = JSON.parse(await Deno.readTextFile(pkgPath));
+          for (const key of ["dependencies", "devDependencies", "overrides"]) {
+            if (srcPkg[key]) pkg[key] = srcPkg[key];
+            else delete pkg[key];
+          }
+          await Deno.writeTextFile(
+            pkgPath,
+            JSON.stringify(pkg, null, 2) + "\n",
+          );
+          // Keep this deck's name in the copied lockfile.
+          srcLock.name = pkg.name;
+          const root =
+            (srcLock.packages as Record<string, Record<string, unknown>>)?.[""];
+          if (root) root.name = pkg.name;
+          await Deno.writeTextFile(
+            `${d.dir}/package-lock.json`,
+            JSON.stringify(srcLock, null, 2) + "\n",
+          );
+          d.logger.info("Installing the dependency versions locked in {src}", {
+            src,
+          });
+          const res = await npm(
+            d,
+            ["ci", "--no-audit", "--no-fund"],
+            args.timeoutMs,
+          );
+          if (res.code !== 0) {
+            throw new Error(
+              `npm ci with the lockfile from ${src} failed: ${
+                tail(res.stderr || res.stdout)
+              }`,
+            );
+          }
         }
 
         for (

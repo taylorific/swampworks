@@ -108,6 +108,12 @@ swamp workflow run @taylor/slidev-new-deck \
 - `slides.md`: a cover slide, a table of contents and a first section
 - `.gitignore`, if the Slidev template didn't create one
 
+When a new upstream release breaks `slidev build` (the `build` step catches it),
+pass `lockfileFrom`, the path of a deck that builds: `scaffold` copies its
+dependency versions and `package-lock.json` and installs them with `npm ci`
+before the first commit, and the workflow's `lockfileFrom` input passes it
+through. Update the deck normally (the `upgrade` method) once upstream is fixed.
+
 It refuses a directory that is already a git repository. Repositories are public
 by default (`visibility=private` for private; GitHub Pages on a private
 repository needs a paid plan). The GitHub steps use the GitHub CLI's login and

@@ -37,6 +37,10 @@ inputs:
       enum: [public, private]
       default: public
       description: Visibility of the new repository
+    lockfileFrom:
+      type: string
+      default: ""
+      description: Path of a deck that builds; its package-lock.json is installed in the new deck, to work around a broken upstream release
     runtime:
       type: string
       enum: [docker, container]
@@ -75,6 +79,7 @@ jobs:
             author: ${{ inputs.author }}
             email: ${{ inputs.email }}
             copyright: ${{ inputs.copyright }}
+            lockfileFrom: ${{ inputs.lockfileFrom }}
         dependsOn:
           - step: init
             condition:
