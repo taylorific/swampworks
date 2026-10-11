@@ -300,6 +300,7 @@ async function launchLocal(
 ): Promise<LaunchedBrowser> {
   const chrome = await resolveChrome(g.chromePath);
   const userDataDir = await Deno.makeTempDir({ prefix: "webshot-" });
+  // swamp-quality-ignore deno-command: launches the headless browser (local backend); fixed argument list, see README What it runs
   const proc = new Deno.Command(chrome, {
     args: [
       "--headless=new",
@@ -343,6 +344,7 @@ async function docker(
 ): Promise<{ ok: boolean; stdout: string; stderr: string }> {
   let out: Deno.CommandOutput;
   try {
+    // swamp-quality-ignore deno-command: runs the docker CLI (docker backend); fixed argument lists, see README What it runs
     const proc = new Deno.Command(g.dockerPath, {
       args,
       stdin: input === undefined ? "null" : "piped",
