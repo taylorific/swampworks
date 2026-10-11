@@ -447,8 +447,15 @@ const FIT_ERRORS: Record<number, string> = {
 /** The `@taylor/slidev/deck` swamp model type. */
 export const model = {
   type: "@taylor/slidev/deck",
-  version: "2026.10.11.1",
+  version: "2026.10.11.2",
   globalArguments: GlobalArgsSchema,
+  upgrades: [
+    {
+      toVersion: "2026.10.11.2",
+      description: "fit reports boxes that scroll or clip; no settings changed",
+      upgradeAttributes: (old: Record<string, unknown>) => old,
+    },
+  ],
   files: {
     screenshot: {
       description:
