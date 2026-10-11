@@ -1,0 +1,105 @@
+name: README
+
+# Keeps the extension table in the root README.md in sync with every
+# `<dir>/manifest.yaml` and with each extension's status on the swamp
+# registry. Runs when a manifest changes on main, daily (publishing and
+# deprecation happen on the registry, outside git), and on demand. Commits
+# only when the table actually changed. Pull requests that change the
+# generator only get it checked; the table is never updated from a PR.
+#
+# The commit is pushed with the workflow's GITHUB_TOKEN, which by design does
+# not trigger other workflows, so it cannot loop.
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - "*/manifest.yaml"
+      - README.md
+      - scripts/readme-extensions.ts
+      - .github/workflows/readme.yml
+  pull_request:
+    branches: [main]
+    paths:
+      - scripts/**
+      - .github/workflows/readme.yml
+  schedule:
+    - cron: "23 7 * * *"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+# Never run two updates at once, and never cancel one mid-push.
+concurrency:
+  group: readme
+  cancel-in-progress: false
+
+env:
+  DENO_VERSION: v2.9.7
+
+jobs:
+  check:
+    name: Check the generator
+    if: github.event_name == 'pull_request'
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - uses: denoland/setup-deno@22d081ff2d3a40755e97629de92e3bcbfa7cf2ed # v2.0.5
+        with:
+          deno-version: ${{ env.DENO_VERSION }}
+
+      - name: Format, lint, type check, test
+        run: |
+          deno fmt --no-config --check scripts/
+          deno lint --no-config scripts/
+          deno check --no-config scripts/*.ts
+          deno test --no-config --allow-all scripts/
+
+      # Runs the real generator against this branch (and the live registry)
+      # without writing, so a broken script fails here rather than on main.
+      - name: Dry run
+        run: >-
+          deno run --no-config --allow-read --allow-net=swamp-club.com
+          scripts/readme-extensions.ts --print
+
+  update:
+    name: Update extension table
+    if: github.event_name != 'pull_request'
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - uses: denoland/setup-deno@22d081ff2d3a40755e97629de92e3bcbfa7cf2ed # v2.0.5
+        with:
+          deno-version: ${{ env.DENO_VERSION }}
+
+      - name: Test the generator
+        run: deno test --no-config --allow-all scripts/
+
+      # Write access is limited to README.md and network access to the
+      # registry, so the generator cannot touch anything else.
+      - name: Regenerate the table
+        run: >-
+          deno run --no-config --allow-read --allow-write=README.md
+          --allow-net=swamp-club.com scripts/readme-extensions.ts
+
+      - name: Commit if changed
+        run: |
+          if git diff --quiet -- README.md; then
+            echo "README.md is already up to date."
+            exit 0
+          fi
+          git diff -- README.md
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git commit -m "Update extension table in README" -- README.md
+          # If main moved while this ran, replay the commit on top and retry.
+          git push || { git pull --rebase origin main && git push; }
