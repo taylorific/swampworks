@@ -1,0 +1,139 @@
+id: d4bd5a13-75d2-4bf6-bdb9-b1834d5f99a4
+name: "@taylor/slidev-new-deck"
+description: Create a Slidev deck from the template, add page numbers, a Pages deploy workflow, README, LICENSE and a starter slides.md, create its GitHub repository, set Pages to build from GitHub Actions, and push it
+tags: {}
+inputs:
+  properties:
+    name:
+      type: string
+      description: Repository and directory name, e.g. kvm-training; also the Pages path /<name>/
+    title:
+      type: string
+      description: Deck title for the cover slide and README
+    owner:
+      type: string
+      description: GitHub user or organization for the repository
+    parentDir:
+      type: string
+      description: Absolute path of the directory the deck is created in, e.g. /Users/me/github/me
+    author:
+      type: string
+      default: ""
+      description: Author on the cover slide (default git config user.name)
+    email:
+      type: string
+      default: ""
+      description: Email on the cover slide (omitted when empty)
+    copyright:
+      type: string
+      default: ""
+      description: Copyright holder for the first line of LICENSE (omitted when empty)
+    description:
+      type: string
+      default: ""
+      description: GitHub repository description
+    visibility:
+      type: string
+      enum: [public, private]
+      default: public
+      description: Visibility of the new repository
+    runtime:
+      type: string
+      enum: [docker, container]
+      default: docker
+      description: Container runtime for Slidev
+  required: [name, title, owner, parentDir]
+jobs:
+  - name: new-deck
+    description: Create, scaffold, publish
+    steps:
+      - name: init
+        description: Create the deck from the Slidev template, with playwright-chromium
+        task:
+          type: model_method
+          modelType: "@taylor/slidev/deck"
+          modelName: deck-${{ inputs.name }}
+          methodName: init
+          globalArgs:
+            dir: ${{ inputs.parentDir + "/" + inputs.name }}
+            runtime: ${{ inputs.runtime }}
+        dependsOn: []
+        weight: 0
+        allowFailure: false
+      - name: scaffold
+        description: Add page numbers, the Pages deploy workflow, README, LICENSE and starter slides, then commit
+        task:
+          type: model_method
+          modelType: "@taylor/slidev/deck"
+          modelName: deck-${{ inputs.name }}
+          methodName: scaffold
+          globalArgs:
+            dir: ${{ inputs.parentDir + "/" + inputs.name }}
+            runtime: ${{ inputs.runtime }}
+          inputs:
+            title: ${{ inputs.title }}
+            author: ${{ inputs.author }}
+            email: ${{ inputs.email }}
+            copyright: ${{ inputs.copyright }}
+        dependsOn:
+          - step: init
+            condition:
+              type: succeeded
+        weight: 0
+        allowFailure: false
+      - name: repo
+        description: Create the GitHub repository if it doesn't exist
+        task:
+          type: model_method
+          modelType: "@taylor/github/repo"
+          modelName: repo-${{ inputs.name }}
+          methodName: ensure
+          globalArgs:
+            owner: ${{ inputs.owner }}
+            name: ${{ inputs.name }}
+          inputs:
+            description: ${{ inputs.description }}
+            visibility: ${{ inputs.visibility }}
+        dependsOn:
+          - step: scaffold
+            condition:
+              type: succeeded
+        weight: 0
+        allowFailure: false
+      - name: pages
+        description: Set GitHub Pages to build from GitHub Actions before the first push triggers a deploy
+        task:
+          type: model_method
+          modelType: "@taylor/github-pages/site"
+          modelName: pages-${{ inputs.name }}
+          methodName: ensure
+          globalArgs:
+            owner: ${{ inputs.owner }}
+            repo: ${{ inputs.name }}
+        dependsOn:
+          - step: repo
+            condition:
+              type: succeeded
+        weight: 0
+        allowFailure: false
+      - name: push
+        description: Push main to the new repository, which runs the deploy workflow
+        task:
+          type: model_method
+          modelType: "@taylor/slidev/deck"
+          modelName: deck-${{ inputs.name }}
+          methodName: push
+          globalArgs:
+            dir: ${{ inputs.parentDir + "/" + inputs.name }}
+            runtime: ${{ inputs.runtime }}
+          inputs:
+            remoteUrl: ${{ data.latest("repo-" + inputs.name, "repo").attributes.sshUrl }}
+        dependsOn:
+          - step: pages
+            condition:
+              type: succeeded
+        weight: 0
+        allowFailure: false
+    dependsOn: []
+    weight: 0
+version: 1

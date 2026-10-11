@@ -552,3 +552,172 @@ Deno.test("init refuses an existing directory", async () => {
     "already exists",
   );
 });
+
+// ---- scaffold / push ----
+
+/** A fake git that records calls and answers from a table. */
+function fakeGit(answers: Record<string, Partial<RunResult>> = {}) {
+  const calls: string[][] = [];
+  const run = (args: string[]) => {
+    calls.push(args);
+    const cmd = args.slice(2).join(" ");
+    const hit = Object.entries(answers).find(([k]) => cmd.startsWith(k));
+    return Promise.resolve({ code: 0, stdout: "", stderr: "", ...hit?.[1] });
+  };
+  return { run, calls };
+}
+
+async function runGit(
+  method: "scaffold" | "push",
+  dir: string,
+  git: ReturnType<typeof fakeGit>,
+  args: Record<string, unknown>,
+) {
+  const test = createModelTestContext({
+    globalArgs: model.globalArguments.parse({ dir }),
+    methodName: method,
+  });
+  // deno-lint-ignore no-explicit-any
+  const m = model.methods[method] as any;
+  await m.execute(
+    { ...m.arguments.parse(args), _git: git.run },
+    test.context as unknown as Ctx,
+  );
+  return test;
+}
+
+Deno.test("scaffold writes the deck files and makes the first commit", async () => {
+  const parent = await Deno.makeTempDir();
+  const dir = `${parent}/kvm-training`;
+  await Deno.mkdir(dir);
+  await Deno.writeTextFile(`${dir}/package.json`, "{}");
+  await Deno.writeTextFile(`${dir}/.gitignore`, "node_modules\n");
+  const git = fakeGit({
+    "config user.name": { stdout: "Mischa Taylor" },
+    "rev-parse HEAD": { stdout: "abc1234def" },
+  });
+  const test = await runGit("scaffold", dir, git, {
+    title: "KVM: Virtual Machines",
+    email: "me@example.com",
+    copyright: "Example, LLC",
+  });
+
+  const read = (p: string) => Deno.readTextFileSync(`${dir}/${p}`);
+  assertStringIncludes(
+    read(".github/workflows/deploy.yml"),
+    "--base /kvm-training/",
+  );
+  assertStringIncludes(read("global-top.vue"), "<Pagination");
+  assertStringIncludes(read("components/Pagination.vue"), "<SlidesTotal />");
+  assertStringIncludes(read("README.md"), "# KVM: Virtual Machines\n");
+  const slides = read("slides.md");
+  assertStringIncludes(slides, 'title: "KVM: Virtual Machines"');
+  assertStringIncludes(slides, "##### Mischa Taylor | 📧 <me@example.com>");
+  assertStringIncludes(slides, "paginationPagesDisabled: [1]");
+  assert(
+    read("LICENSE").startsWith(
+      `Copyright (c) ${new Date().getFullYear()} Example, LLC\n\nThe code`,
+    ),
+  );
+  // The template's .gitignore is kept.
+  assertEquals(read(".gitignore"), "node_modules\n");
+
+  assertEquals(git.calls.map((c) => c.slice(2, 4).join(" ")), [
+    "config user.name",
+    "init --initial-branch=main",
+    "add --all",
+    "commit --quiet",
+    "rev-parse HEAD",
+  ]);
+  assertEquals(git.calls[1].slice(0, 2), ["-C", dir]);
+  const r = resource(test);
+  assertEquals(r.commit, "abc1234def");
+  assertEquals((r.files as string[]).includes("LICENSE"), true);
+});
+
+Deno.test("scaffold without a license or email", async () => {
+  const dir = await tempDeck();
+  const git = fakeGit();
+  await runGit("scaffold", dir, git, {
+    title: "Talk",
+    author: "Sam",
+    license: false,
+  });
+  assertEquals(git.calls[0].slice(2, 3), ["init"]);
+  assertStringIncludes(
+    Deno.readTextFileSync(`${dir}/slides.md`),
+    "##### Sam\n",
+  );
+  await assertRejects(() => Deno.stat(`${dir}/LICENSE`));
+  // No .gitignore from the template, so scaffold writes one.
+  assertStringIncludes(Deno.readTextFileSync(`${dir}/.gitignore`), "dist");
+});
+
+Deno.test("scaffold refuses an existing git repository", async () => {
+  const dir = await tempDeck();
+  await Deno.mkdir(`${dir}/.git`);
+  await assertRejects(
+    () => runGit("scaffold", dir, fakeGit(), { title: "Talk", author: "Sam" }),
+    Error,
+    "already a git repository",
+  );
+});
+
+Deno.test("scaffold reports a failed commit", async () => {
+  const dir = await tempDeck();
+  const git = fakeGit({
+    "commit": { code: 128, stderr: "Please tell me who you are." },
+  });
+  await assertRejects(
+    () => runGit("scaffold", dir, git, { title: "Talk", author: "Sam" }),
+    Error,
+    "git commit failed",
+  );
+});
+
+const REMOTE = "git@github.com:taylorific/talk.git";
+
+Deno.test("push adds origin when missing and pushes main", async () => {
+  const dir = await tempDeck();
+  const git = fakeGit({
+    "remote get-url origin": { code: 2, stderr: "No such remote" },
+    "rev-parse main": { stdout: "abc1234" },
+  });
+  const test = await runGit("push", dir, git, { remoteUrl: REMOTE });
+  assertEquals(git.calls.map((c) => c.slice(2).join(" ")), [
+    "remote get-url origin",
+    `remote add origin ${REMOTE}`,
+    "push --set-upstream origin main",
+    "rev-parse main",
+  ]);
+  assertEquals(resource(test).commit, "abc1234");
+});
+
+Deno.test("push reuses a matching origin and refuses a different one", async () => {
+  const dir = await tempDeck();
+  const same = fakeGit({ "remote get-url origin": { stdout: REMOTE } });
+  await runGit("push", dir, same, { remoteUrl: REMOTE });
+  assertEquals(same.calls.some((c) => c.includes("add")), false);
+
+  const other = fakeGit({
+    "remote get-url origin": { stdout: "git@github.com:someone/else.git" },
+  });
+  await assertRejects(
+    () => runGit("push", dir, other, { remoteUrl: REMOTE }),
+    Error,
+    "origin is already git@github.com:someone/else.git",
+  );
+});
+
+Deno.test("push reports a rejected push", async () => {
+  const dir = await tempDeck();
+  const git = fakeGit({
+    "remote get-url origin": { stdout: REMOTE },
+    "push": { code: 1, stderr: "Permission denied (publickey)." },
+  });
+  await assertRejects(
+    () => runGit("push", dir, git, { remoteUrl: REMOTE }),
+    Error,
+    "Permission denied",
+  );
+});
