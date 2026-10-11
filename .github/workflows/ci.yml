@@ -1,0 +1,209 @@
+name: CI
+
+# Checks every swamp extension in this repository: any top-level directory
+# with a manifest.yaml. Pull requests check only the extensions they touch
+# (every extension when this workflow itself changes); pushes to main and
+# manual runs check all of them.
+#
+# No secrets are used anywhere in this workflow. Actions are pinned to commit
+# SHAs (a tag can be moved to different code), the token is read-only, and
+# checkouts do not keep credentials.
+
+on:
+  pull_request:
+    branches: [main]
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+# A newer push to a pull request supersedes the running check. Runs on main
+# are never cancelled, so every commit on main gets a complete result.
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+env:
+  # The Deno version bundled with swamp (`~/.swamp/deno/deno --version`), so
+  # CI formats, lints, and type-checks exactly as `swamp extension fmt` and
+  # the registry do. Bump it together with swamp.
+  DENO_VERSION: v2.9.7
+
+defaults:
+  run:
+    shell: bash
+
+jobs:
+  discover:
+    name: Discover extensions
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    outputs:
+      extensions: ${{ steps.find.outputs.extensions }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Find extensions to check
+        id: find
+        env:
+          EVENT: ${{ github.event_name }}
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+        run: |
+          set -euo pipefail
+          all=$(find . -mindepth 2 -maxdepth 2 -name manifest.yaml -not -path './.git/*' \
+            | sed 's|^\./||; s|/manifest\.yaml$||' | sort)
+          selected="$all"
+          if [ "$EVENT" = "pull_request" ]; then
+            changed=$(git diff --name-only "${BASE_SHA}...${HEAD_SHA}")
+            if ! grep -q '^\.github/' <<< "$changed"; then
+              selected=""
+              for dir in $all; do
+                if grep -q "^${dir}/" <<< "$changed"; then
+                  selected="${selected}${dir}"$'\n'
+                fi
+              done
+            fi
+          fi
+          json=$(printf '%s\n' "$selected" | jq -Rcn '[inputs | select(length > 0)]')
+          echo "Extensions to check: $json"
+          echo "extensions=$json" >> "$GITHUB_OUTPUT"
+
+  check:
+    name: check ${{ matrix.extension }}
+    needs: discover
+    if: needs.discover.outputs.extensions != '[]'
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    strategy:
+      fail-fast: false
+      matrix:
+        extension: ${{ fromJson(needs.discover.outputs.extensions) }}
+    defaults:
+      run:
+        working-directory: ${{ matrix.extension }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - uses: denoland/setup-deno@22d081ff2d3a40755e97629de92e3bcbfa7cf2ed # v2.0.5
+        with:
+          deno-version: ${{ env.DENO_VERSION }}
+
+      # Shipped source is extensions/; ci/ holds an extension's CI-only
+      # scripts. Both are held to the same standard. --no-config keeps the
+      # checks hermetic, like the registry scorer.
+      - name: Format
+        run: |
+          paths=(extensions); [ -d ci ] && paths+=(ci)
+          deno fmt --no-config --check "${paths[@]}"
+
+      - name: Lint
+        run: |
+          paths=(extensions); [ -d ci ] && paths+=(ci)
+          deno lint --no-config "${paths[@]}"
+
+      - name: Type check
+        run: |
+          paths=(extensions); [ -d ci ] && paths+=(ci)
+          find "${paths[@]}" -name '*.ts' -print0 | xargs -0 deno check --no-config
+
+      - name: Test
+        run: deno test --no-config --allow-all extensions/
+
+      # From webframp/swamp-extensions: the registry cannot resolve bare
+      # specifiers (`from "zod"`), and an extension that uses them publishes
+      # but scores UNSCORED. deno check/lint/test all pass with them, so this
+      # is the only check that catches it. Shipped imports must be npm:, jsr:,
+      # https:, or relative.
+      - name: Inline import specifiers only
+        run: |
+          set -euo pipefail
+          bare=$(grep -rnE --include='*.ts' --exclude='*_test.ts' \
+            '(from|import)[[:space:]]+"[^".]' extensions/ \
+            | grep -vE '"(npm:|jsr:|https://|node:)' || true)
+          if [ -n "$bare" ]; then
+            echo "::error::Bare import specifiers in shipped source. Use pinned npm:/jsr: specifiers (e.g. \"npm:zod@4\")."
+            echo "$bare"
+            exit 1
+          fi
+          pins=$(grep -rhoE --include='*.ts' 'npm:zod@[^"]*' extensions/ | sort -u)
+          if [ "$(printf '%s' "$pins" | grep -c . || true)" -gt 1 ]; then
+            echo "::error::Inconsistent zod pins — every file must use the same one:"
+            echo "$pins"
+            exit 1
+          fi
+          echo "Import specifiers OK (zod: ${pins:-not used})"
+
+      # From umag/swamp-workspace: each model's `version:` must equal the
+      # manifest version, so the published package and the model type it
+      # contains never drift apart.
+      - name: Model version matches manifest
+        env:
+          EXTENSION: ${{ matrix.extension }}
+        run: |
+          set -euo pipefail
+          manifest=$(grep -m1 '^version:' manifest.yaml | sed -E 's/^version:[[:space:]]*"?([^"]+)"?.*/\1/')
+          if [ -z "$manifest" ]; then
+            echo "::error file=${EXTENSION}/manifest.yaml::No version in manifest.yaml"
+            exit 1
+          fi
+          rc=0
+          while IFS= read -r -d '' f; do
+            while IFS= read -r v; do
+              if [ "$v" != "$manifest" ]; then
+                echo "::error file=${EXTENSION}/${f}::Model version \"$v\" does not match manifest version \"$manifest\""
+                rc=1
+              fi
+            done < <(grep -oE '^[[:space:]]*version:[[:space:]]*"[0-9][^"]*"' "$f" | grep -oE '"[^"]+"' | tr -d '"')
+          done < <(find extensions/models -maxdepth 1 -name '*.ts' ! -name '*_test.ts' -print0)
+          [ "$rc" -eq 0 ] && echo "Model versions match manifest $manifest"
+          exit "$rc"
+
+  webshot-smoke:
+    name: webshot smoke (real Chrome in Docker)
+    needs: discover
+    if: contains(fromJson(needs.discover.outputs.extensions), 'webshot')
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    defaults:
+      run:
+        working-directory: webshot
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - uses: denoland/setup-deno@22d081ff2d3a40755e97629de92e3bcbfa7cf2ed # v2.0.5
+        with:
+          deno-version: ${{ env.DENO_VERSION }}
+
+      # Pulls the pinned headless-shell image and builds the Noto font image
+      # from scratch (~2 minutes) on every run, which also catches the pinned
+      # Debian font packages disappearing from the mirror.
+      - name: Smoke test
+        run: deno run --allow-all ci/smoke.ts "$RUNNER_TEMP/webshot-smoke"
+
+      - name: No containers left behind
+        if: always()
+        run: |
+          left=$(docker ps -aq --filter label=webshot=1)
+          if [ -n "$left" ]; then
+            echo "::error::webshot left containers running:"
+            docker ps -a --filter label=webshot=1
+            exit 1
+          fi
+
+      - name: Upload captures
+        if: failure()
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: webshot-smoke-captures
+          path: ${{ runner.temp }}/webshot-smoke
+          retention-days: 7
