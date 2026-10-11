@@ -4,8 +4,9 @@ A [swamp](https://swamp.club/) extension for working on
 [Slidev](https://sli.dev/) decks entirely inside a container, so the host needs
 no Node. Its headline feature is a **slide fit check**: it opens every slide
 with all clicks revealed and reports content that runs off the bottom or right
-edge, bumps against the bottom, or scrolls inside a code block or table, with
-the source file and line of each slide and a screenshot.
+edge, bumps against the bottom, or is hidden inside a box that scrolls or clips
+(a code block with `maxHeight`, a table too wide for the slide), with the source
+file and line of each slide and a screenshot.
 
 It runs [`boxcutter/slidev`](https://hub.docker.com/r/boxcutter/slidev) (or a
 compatible image) with **Docker** or **Apple's `container` CLI**.

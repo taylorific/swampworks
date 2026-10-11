@@ -35,7 +35,11 @@ starts, relative to the deck), `problems` and measurements in slide pixels:
   16:9). `bottomEl` names the lowest element. Content close to the bottom
   counts: the user treats "bumping against the bottom" as not fitting.
 - `right`: the content reaches past 960 of 980. `rightEl` names it.
-- `scroll`: a code block or table scrolls inside itself, hiding content.
+- `scroll`: a box scrolls or clips its content, such as a code block with
+  `maxHeight` or a table too wide for the slide. `scrolled` names the box. A
+  code block that steps through highlights (`{2|3|5-8|all}`) with `maxHeight` is
+  usually deliberate, because Slidev scrolls each highlighted step into view;
+  point it out instead of changing it.
 
 Open each flagged slide's screenshot (`<shotsDir>/slide-NNN.png`) before
 editing: the numbers say where, the picture says why. If fit fails because the
@@ -65,9 +69,14 @@ Rules the user has set:
 
 ## 3. Re-check
 
-Re-run `fit` with `--input slides=<the ones you changed>` until they pass. If
-any slide was split, the numbers after it shift: finish with a full `fit` run
-and confirm no slide is flagged.
+While fixing, re-check only the slides you changed:
+`--input slides=<the ones you changed>`. A full run of a large deck takes
+minutes (about 5 for 250 slides); a handful of slides takes seconds. Repeat
+until those pass.
+
+Splitting a slide shifts the numbers of every slide after the split, so finish
+with one full `fit` run (`--input screenshots=none` is enough) and confirm
+nothing new is flagged.
 
 ## 4. Report
 

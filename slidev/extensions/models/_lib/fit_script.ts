@@ -98,23 +98,43 @@ for (const s of slides) {
       placed.set(el, v);
       return v;
     };
+    // A box that scrolls or clips (a code block with maxHeight, a wide
+    // table) hides whatever doesn't fit inside it. Report the box as
+    // scrolled, and measure the box rather than the content hidden in it.
+    const clips = (cs) =>
+      cs.overflowX !== "visible" || cs.overflowY !== "visible";
+    const layouts = new Set(pg.querySelectorAll(".slidev-layout"));
+    const inside = new WeakMap();
+    const isInsideClip = (el) => {
+      const parent = el.parentElement;
+      if (!parent || parent === pg || layouts.has(parent)) return false;
+      if (inside.has(el)) return inside.get(el);
+      const v = clips(getComputedStyle(parent)) || isInsideClip(parent);
+      inside.set(el, v);
+      return v;
+    };
+    const overflows = (el) =>
+      el.scrollWidth > el.clientWidth + 4 || el.scrollHeight > el.clientHeight + 4;
+    const scrolledEls = new Set();
     for (const el of pg.querySelectorAll(".slidev-layout *")) {
       const cs = getComputedStyle(el);
       if (
-        isPlaced(el) || cs.visibility === "hidden" || cs.opacity === "0" ||
-        cs.display === "none"
+        isPlaced(el) || isInsideClip(el) || cs.visibility === "hidden" ||
+        cs.opacity === "0" || cs.display === "none"
       ) continue;
       const rb = el.getBoundingClientRect();
       if (rb.height === 0 || rb.width === 0) continue;
+      if (clips(cs) && overflows(el)) scrolledEls.add(el);
       const b = (rb.bottom - box.top) / scale;
       const r = (rb.right - box.left) / scale;
       if (b > bottom) { bottom = b; bottomEl = describe(el); }
       if (r > right) { right = r; rightEl = describe(el); }
     }
-    // Code blocks and tables that scroll inside themselves still hide content.
-    const scrolled = [...pg.querySelectorAll(".slidev-layout pre, .slidev-layout table, .slidev-layout .slidev-code")]
-      .filter((el) => el.scrollWidth > el.clientWidth + 2 || el.scrollHeight > el.clientHeight + 2)
-      .map(describe);
+    // Code blocks and tables can also scroll without clipping their parent.
+    for (const el of pg.querySelectorAll(".slidev-layout pre, .slidev-layout table, .slidev-layout .slidev-code")) {
+      if (!isPlaced(el) && !isInsideClip(el) && overflows(el)) scrolledEls.add(el);
+    }
+    const scrolled = [...scrolledEls].map(describe);
     return {
       height: Math.round(box.height / scale),
       bottom: Math.round(bottom),
