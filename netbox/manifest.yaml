@@ -1,0 +1,17 @@
+manifestVersion: 1
+name: "@taylor/netbox"
+version: "2026.10.11.1"
+description: "Run a NetBox instance for development and testing with Docker Compose: NetBox, its background worker, PostgreSQL and Valkey from the netbox-docker images. Start generates the internal secrets on first run, waits for every service to be healthy, sets the superuser's password from a vault and, optionally, gives it a v2 API token from a vault. Also reports status and stops or removes the project, keeping the volumes unless asked."
+repository: "https://github.com/taylorific/swampworks"
+models:
+  - netbox_instance.ts
+additionalFiles:
+  - README.md
+  - LICENSE
+  - COPYING
+  - COPYING-EXCEPTION
+labels:
+  - netbox
+  - docker
+  - dcim
+  - ipam
