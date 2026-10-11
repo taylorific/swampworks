@@ -15,15 +15,18 @@ compatible image) with **Docker** or **Apple's `container` CLI**.
 
 The `@taylor/slidev/deck` model type points at one deck directory:
 
-| Method     | What it does                                                                                   |
-| ---------- | ---------------------------------------------------------------------------------------------- |
-| `fit`      | Measure every slide (or `slides=3,7,10-14`) and flag the ones that don't fit, with screenshots |
-| `serve`    | Start the dev server in a background container (`slidev --remote`) and wait until it answers   |
-| `stop`     | Stop that server                                                                               |
-| `outdated` | `npm outdated`: packages with newer versions                                                   |
-| `upgrade`  | Move `@slidev/*`, `vue` and `playwright-chromium` to `@latest`, adding `playwright-chromium`   |
-| `export`   | Export the deck to PDF                                                                         |
-| `init`     | Create a new deck at `dir` from the Slidev template, with `playwright-chromium`                |
+| Method     | What it does                                                                                                                                  |
+| ---------- | --------------------------------------------------------------------------------------------------------------------------------------------- |
+| `fit`      | Measure every slide (or `slides=3,7,10-14`) and flag the ones that don't fit, with screenshots                                                |
+| `serve`    | Start the dev server in a background container (`slidev --remote`) and wait until it answers                                                  |
+| `stop`     | Stop that server                                                                                                                              |
+| `outdated` | `npm outdated`: packages with newer versions                                                                                                  |
+| `upgrade`  | Move `@slidev/*`, `vue` and `playwright-chromium` to `@latest`, adding `playwright-chromium`                                                  |
+| `export`   | Export the deck to PDF                                                                                                                        |
+| `init`     | Create a new deck at `dir` from the Slidev template, with `playwright-chromium`                                                               |
+| `scaffold` | Add page numbers, a GitHub Pages deploy workflow, README, LICENSE and a starter `slides.md` to a deck from `init`, then `git init` and commit |
+| `build`    | Check the deck builds for production (`slidev build`), as a Pages deploy would; fails with the build log if it doesn't                        |
+| `push`     | Push the deck to a remote as `origin`, adding `origin` if it's missing                                                                        |
 
 `fit` and `export` drive the Chromium that the deck's `playwright-chromium`
 package installs into `node_modules`, so the deck needs that package; `upgrade`
@@ -75,6 +78,47 @@ measured in Slidev's own units (980 wide, 552 high for 16:9), so the result
 doesn't depend on screen size. Absolutely positioned elements, such as corner
 buttons and `abs-br` boxes, are placed deliberately and are ignored.
 
+### A new deck on GitHub
+
+The `@taylor/slidev-new-deck` workflow goes from nothing to a published deck:
+`init`, `scaffold`, `build` (so a deck that won't build stops here, before
+anything is created on GitHub), then (with
+[`@taylor/github`](https://swamp-club.com/extensions/@taylor/github) and
+[`@taylor/github-pages`](https://swamp-club.com/extensions/@taylor/github-pages),
+installed with this extension) create the GitHub repository, set Pages to build
+from GitHub Actions, and push. The push runs the deploy workflow, so the deck
+appears at `https://<owner>.github.io/<name>/`.
+
+```sh
+swamp workflow run @taylor/slidev-new-deck \
+  --input name=kvm-training --input title="Virtual Machines with KVM/QEMU" \
+  --input owner=my-account --input parentDir="$HOME/github/my-account" \
+  --input email=me@example.com --input copyright="My Name"
+```
+
+`scaffold` adds:
+
+- `components/Pagination.vue` and `global-top.vue`: a page number in the top
+  right of every slide but the cover, set by `themeConfig` in `slides.md`
+- `.github/workflows/deploy.yml`: builds with `--base /<name>/` and deploys to
+  GitHub Pages
+- `README.md`: how to run and update the deck with the container image
+- `LICENSE` (`license: false` to skip): code under Apache-2.0, slides under CC
+  BY 4.0, logos excluded, with an optional copyright line
+- `slides.md`: a cover slide, a table of contents and a first section
+- `.gitignore`, if the Slidev template didn't create one
+
+When a new upstream release breaks `slidev build` (the `build` step catches it),
+pass `lockfileFrom`, the path of a deck that builds: `scaffold` copies its
+dependency versions and `package-lock.json` and installs them with `npm ci`
+before the first commit, and the workflow's `lockfileFrom` input passes it
+through. Update the deck normally (the `upgrade` method) once upstream is fixed.
+
+It refuses a directory that is already a git repository. Repositories are public
+by default (`visibility=private` for private; GitHub Pages on a private
+repository needs a paid plan). The GitHub steps use the GitHub CLI's login and
+`push` uses your git credentials.
+
 ### Fit passes with an agent
 
 The bundled `slide-fit` skill turns this into a routine for Claude Code and
@@ -99,7 +143,20 @@ rm --force slidev-<deck>                   # docker; Apple: delete --force
 run --rm ... --entrypoint npm <image> outdated --json
 run --rm ... --entrypoint npm <image> install --no-audit --no-fund <pkg>@latest ...
 run --rm ... --mount <tmp>:/out <image> export --output /out/slides.pdf
+run --rm ... <image> build --out /tmp/slidev-build   # build: output stays in the container
 run --rm ... --mount <parent>:/slidev --entrypoint bash <image> -c 'echo n | npm init slidev@latest --yes <name>'
+```
+
+`scaffold` and `push` run git on the host, in the deck directory:
+
+```
+git -C <deck> config user.name             # scaffold, when no author is given
+git -C <deck> init --initial-branch=main
+git -C <deck> add --all
+git -C <deck> commit --quiet --message "Initial slides"
+git -C <deck> remote get-url origin        # push: add origin if missing, refuse a different one
+git -C <deck> remote add origin <remoteUrl>
+git -C <deck> push --set-upstream origin <branch>
 ```
 
 Throwaway containers are removed on timeout too. The fit script

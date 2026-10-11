@@ -1,5 +1,15 @@
 import { z } from "npm:zod@4";
 import { FIT_SCRIPT } from "./_lib/fit_script.ts";
+import {
+  type DeckInfo,
+  deployYml,
+  GITIGNORE,
+  GLOBAL_TOP_VUE,
+  license,
+  PAGINATION_VUE,
+  readme,
+  slidesMd,
+} from "./_lib/templates.ts";
 
 // A Slidev deck worked on entirely inside a container image (by default
 // docker.io/boxcutter/slidev), so the host needs no Node. The deck directory
@@ -108,6 +118,41 @@ const InitArgsSchema = z.object({
 });
 type InitArgs = z.infer<typeof InitArgsSchema>;
 
+const ScaffoldArgsSchema = z.object({
+  title: z.string().min(1).describe(
+    "Deck title, used for the cover slide and the README",
+  ),
+  author: z.string().optional().describe(
+    "Author on the cover slide. Default: git config user.name",
+  ),
+  email: z.string().optional().describe(
+    "Email on the cover slide; omitted when not given",
+  ),
+  license: z.boolean().default(true).describe(
+    "Write LICENSE: code under Apache-2.0, slides under CC BY 4.0",
+  ),
+  copyright: z.string().optional().describe(
+    "Copyright holder for the first line of LICENSE",
+  ),
+  lockfileFrom: z.string().optional().describe(
+    "Path of a deck that builds; its package-lock.json and dependency versions are copied in and installed with npm ci, to work around a broken upstream release",
+  ),
+  timeoutMs: z.number().int().positive().default(900000).describe(
+    "Timeout for npm ci when lockfileFrom is given",
+  ),
+});
+type ScaffoldArgs = z.infer<typeof ScaffoldArgsSchema>;
+
+const PushArgsSchema = z.object({
+  remoteUrl: z.string().min(1).describe(
+    "Remote to push to as origin, e.g. git@github.com:<owner>/<name>.git",
+  ),
+  branch: z.string().regex(/^[A-Za-z0-9._\/-]+$/).default("main").describe(
+    "Branch to push",
+  ),
+});
+type PushArgs = z.infer<typeof PushArgsSchema>;
+
 const TimeoutArgsSchema = z.object({
   timeoutMs: z.number().int().positive().default(300000).describe(
     "Timeout for the command",
@@ -181,6 +226,30 @@ const UpgradeSchema = z.object({
   upgradedAt: z.string(),
 });
 
+const BuildSchema = z.object({
+  dir: z.string(),
+  ok: z.boolean(),
+  durationMs: z.number(),
+  log: z.string(),
+  builtAt: z.string(),
+});
+
+const ScaffoldSchema = z.object({
+  dir: z.string(),
+  files: z.array(z.string()),
+  branch: z.string(),
+  commit: z.string(),
+  scaffoldedAt: z.string(),
+});
+
+const PushSchema = z.object({
+  dir: z.string(),
+  remoteUrl: z.string(),
+  branch: z.string(),
+  commit: z.string(),
+  pushedAt: z.string(),
+});
+
 const DeckSchema = z.object({
   dir: z.string(),
   slidevVersion: z.string(),
@@ -231,6 +300,7 @@ export type Runner = (
 // the schema, so they cannot be set from the CLI or a workflow.
 interface TestHooks {
   _run?: Runner;
+  _git?: Runner;
   _fetch?: (url: string) => Promise<Response>;
   _sleep?: (ms: number) => Promise<void>;
 }
@@ -243,7 +313,7 @@ export function commandRunner(bin: string): Runner {
       : AbortSignal.timeout(timeoutMs);
     let out: Deno.CommandOutput;
     try {
-      // swamp-quality-ignore deno-command: runs the docker or Apple container CLI; argument lists are built in this file, see README What it runs
+      // swamp-quality-ignore deno-command: runs the docker or Apple container CLI, and git for scaffold and push; argument lists are built in this file, see README What it runs
       out = await new Deno.Command(bin, {
         args,
         stdin: "null",
@@ -266,6 +336,13 @@ export function commandRunner(bin: string): Runner {
       stderr: dec.decode(out.stderr).trim(),
     };
   };
+}
+
+/** Runs git in the deck directory on the host. */
+function gitIn(dir: string, run?: Runner) {
+  const r = run ?? commandRunner("git");
+  return (args: string[], timeoutMs = 60000) =>
+    r(["-C", dir, ...args], { timeoutMs });
 }
 
 /** Commands that differ between Docker and Apple's container CLI. */
@@ -447,12 +524,17 @@ const FIT_ERRORS: Record<number, string> = {
 /** The `@taylor/slidev/deck` swamp model type. */
 export const model = {
   type: "@taylor/slidev/deck",
-  version: "2026.10.11.2",
+  version: "2026.10.11.3",
   globalArguments: GlobalArgsSchema,
   upgrades: [
     {
       toVersion: "2026.10.11.2",
       description: "fit reports boxes that scroll or clip; no settings changed",
+      upgradeAttributes: (old: Record<string, unknown>) => old,
+    },
+    {
+      toVersion: "2026.10.11.3",
+      description: "Adds scaffold, build and push; no settings changed",
       upgradeAttributes: (old: Record<string, unknown>) => old,
     },
   ],
@@ -503,6 +585,25 @@ export const model = {
       schema: DeckSchema,
       lifetime: "infinite",
       garbageCollection: 3,
+    },
+    build: {
+      description: "The last production build check (instance build)",
+      schema: BuildSchema,
+      lifetime: "infinite",
+      garbageCollection: 10,
+    },
+    scaffold: {
+      description:
+        "Files scaffold added and the first commit (instance scaffold)",
+      schema: ScaffoldSchema,
+      lifetime: "infinite",
+      garbageCollection: 3,
+    },
+    push: {
+      description: "The last push to the remote (instance push)",
+      schema: PushSchema,
+      lifetime: "infinite",
+      garbageCollection: 10,
     },
   },
   methods: {
@@ -857,6 +958,48 @@ export const model = {
       },
     },
 
+    build: {
+      description:
+        "Check that the deck builds for production (slidev build), as a Pages deploy would; fails with the build log if it doesn't",
+      arguments: TimeoutArgsSchema.extend({
+        timeoutMs: z.number().int().positive().default(900000).describe(
+          "Timeout for the build, including a first-run npm install",
+        ),
+      }),
+      execute: async (
+        args: TimeoutArgs & TestHooks,
+        context: Context,
+      ) => {
+        const d = deck(context, args);
+        d.logger.info("Building {dir} for production", { dir: d.dir });
+        const started = Date.now();
+        // The output goes to the throwaway container's /tmp, so the deck
+        // directory is left as it was.
+        const res = await runOnce(d, "build", {
+          image: ["build", "--out", "/tmp/slidev-build"],
+        }, args.timeoutMs);
+        const log = tail(`${res.stdout}\n${res.stderr}`.trim(), 25);
+        const ok = res.code === 0 && !/Build failed/.test(log);
+        const durationMs = Date.now() - started;
+        if (!ok) {
+          throw new Error(
+            `slidev build failed (exit ${res.code}), so a Pages deploy would fail too:\n${log}`,
+          );
+        }
+        d.logger.info("Built in {s}s", {
+          s: Math.round(durationMs / 1000),
+        });
+        const handle = await context.writeResource("build", "build", {
+          dir: d.dir,
+          ok,
+          durationMs,
+          log,
+          builtAt: new Date().toISOString(),
+        });
+        return { dataHandles: [handle] };
+      },
+    },
+
     export: {
       description: "Export the deck to PDF (slidev export)",
       arguments: ExportArgsSchema,
@@ -919,6 +1062,8 @@ export const model = {
           );
         }
         d.logger.info("Creating a Slidev deck at {dir}", { dir: d.dir });
+        // The runtime can only mount a directory that exists.
+        await Deno.mkdir(parent, { recursive: true });
         const res = await runOnce(
           { ...d, dir: parent },
           "init",
@@ -958,6 +1103,195 @@ export const model = {
           createdAt: new Date().toISOString(),
         });
         d.logger.info("Created {dir}", { dir: d.dir });
+        return { dataHandles: [handle] };
+      },
+    },
+
+    scaffold: {
+      description:
+        "Add page numbers, a GitHub Pages deploy workflow, README, LICENSE and a starter slides.md to a deck from init, then git init and commit",
+      arguments: ScaffoldArgsSchema,
+      execute: async (args: ScaffoldArgs & TestHooks, context: Context) => {
+        const d = deck(context, args);
+        const git = gitIn(d.dir, args._git);
+        let isRepo = false;
+        try {
+          Deno.statSync(`${d.dir}/.git`);
+          isRepo = true;
+        } catch { /* good */ }
+        if (isRepo) {
+          throw new Error(
+            `${d.dir} is already a git repository; scaffold is for a new deck from init`,
+          );
+        }
+        const name = d.dir.slice(d.dir.lastIndexOf("/") + 1);
+        // Workflows pass unset inputs as "", so treat "" as not given.
+        const author = args.author ||
+          (await git(["config", "user.name"])).stdout;
+        if (!author) {
+          throw new Error(
+            "No author given and git config user.name is not set",
+          );
+        }
+        const info: DeckInfo = {
+          name,
+          title: args.title,
+          author,
+          email: args.email,
+          copyright: args.copyright,
+          year: new Date().getFullYear(),
+        };
+        d.logger.info("Scaffolding {name} ({title})", {
+          name,
+          title: args.title,
+        });
+
+        const files: Record<string, string> = {
+          "components/Pagination.vue": PAGINATION_VUE,
+          "global-top.vue": GLOBAL_TOP_VUE,
+          ".github/workflows/deploy.yml": deployYml(name),
+          "README.md": readme(info),
+          "slides.md": slidesMd(info),
+          ...(args.license ? { "LICENSE": license(info) } : {}),
+        };
+        let hasGitignore = false;
+        try {
+          hasGitignore = Deno.statSync(`${d.dir}/.gitignore`).isFile;
+        } catch { /* write one */ }
+        if (!hasGitignore) files[".gitignore"] = GITIGNORE;
+        for (const [path, content] of Object.entries(files)) {
+          const full = `${d.dir}/${path}`;
+          await Deno.mkdir(full.slice(0, full.lastIndexOf("/")), {
+            recursive: true,
+          });
+          await Deno.writeTextFile(full, content);
+        }
+
+        // Workflows pass unset inputs as "", so treat "" as not given.
+        if (args.lockfileFrom) {
+          const src = args.lockfileFrom.replace(/\/+$/, "");
+          let srcPkg: Record<string, unknown>;
+          let srcLock: Record<string, unknown>;
+          try {
+            srcPkg = JSON.parse(await Deno.readTextFile(`${src}/package.json`));
+            srcLock = JSON.parse(
+              await Deno.readTextFile(`${src}/package-lock.json`),
+            );
+          } catch {
+            throw new Error(
+              `lockfileFrom ${src} needs a package.json and package-lock.json`,
+            );
+          }
+          const pkgPath = `${d.dir}/package.json`;
+          const pkg = JSON.parse(await Deno.readTextFile(pkgPath));
+          for (const key of ["dependencies", "devDependencies", "overrides"]) {
+            if (srcPkg[key]) pkg[key] = srcPkg[key];
+            else delete pkg[key];
+          }
+          await Deno.writeTextFile(
+            pkgPath,
+            JSON.stringify(pkg, null, 2) + "\n",
+          );
+          // Keep this deck's name in the copied lockfile.
+          srcLock.name = pkg.name;
+          const root =
+            (srcLock.packages as Record<string, Record<string, unknown>>)?.[""];
+          if (root) root.name = pkg.name;
+          await Deno.writeTextFile(
+            `${d.dir}/package-lock.json`,
+            JSON.stringify(srcLock, null, 2) + "\n",
+          );
+          d.logger.info("Installing the dependency versions locked in {src}", {
+            src,
+          });
+          const res = await npm(
+            d,
+            ["ci", "--no-audit", "--no-fund"],
+            args.timeoutMs,
+          );
+          if (res.code !== 0) {
+            throw new Error(
+              `npm ci with the lockfile from ${src} failed: ${
+                tail(res.stderr || res.stdout)
+              }`,
+            );
+          }
+        }
+
+        for (
+          const cmd of [
+            ["init", "--initial-branch=main"],
+            ["add", "--all"],
+            ["commit", "--quiet", "--message", "Initial slides"],
+          ]
+        ) {
+          const r = await git(cmd);
+          if (r.code !== 0) {
+            throw new Error(
+              `git ${cmd[0]} failed in ${d.dir}: ${tail(r.stderr || r.stdout)}`,
+            );
+          }
+        }
+        const commit = (await git(["rev-parse", "HEAD"])).stdout;
+        d.logger.info("Committed {n} new files as {commit}", {
+          n: Object.keys(files).length,
+          commit: commit.slice(0, 7),
+        });
+        const handle = await context.writeResource("scaffold", "scaffold", {
+          dir: d.dir,
+          files: Object.keys(files).sort(),
+          branch: "main",
+          commit,
+          scaffoldedAt: new Date().toISOString(),
+        });
+        return { dataHandles: [handle] };
+      },
+    },
+
+    push: {
+      description:
+        "Push the deck to a remote as origin (adding origin if it's missing) and set the branch to track it",
+      arguments: PushArgsSchema,
+      execute: async (args: PushArgs & TestHooks, context: Context) => {
+        const d = deck(context, args);
+        const git = gitIn(d.dir, args._git);
+        d.logger.info("Pushing {branch} of {dir} to {remote}", {
+          branch: args.branch,
+          dir: d.dir,
+          remote: args.remoteUrl,
+        });
+        const origin = await git(["remote", "get-url", "origin"]);
+        if (origin.code !== 0) {
+          const r = await git(["remote", "add", "origin", args.remoteUrl]);
+          if (r.code !== 0) {
+            throw new Error(`git remote add failed: ${tail(r.stderr)}`);
+          }
+        } else if (origin.stdout !== args.remoteUrl) {
+          throw new Error(
+            `origin is already ${origin.stdout}, not ${args.remoteUrl}; change it with git remote set-url if that's intended`,
+          );
+        }
+        const r = await git(
+          ["push", "--set-upstream", "origin", args.branch],
+          300000,
+        );
+        if (r.code !== 0) {
+          throw new Error(
+            `git push failed: ${tail(r.stderr || r.stdout)}`,
+          );
+        }
+        const commit = (await git(["rev-parse", args.branch])).stdout;
+        d.logger.info("Pushed {commit} to {remote}", {
+          commit: commit.slice(0, 7),
+          remote: args.remoteUrl,
+        });
+        const handle = await context.writeResource("push", "push", {
+          dir: d.dir,
+          remoteUrl: args.remoteUrl,
+          branch: args.branch,
+          commit,
+          pushedAt: new Date().toISOString(),
+        });
         return { dataHandles: [handle] };
       },
     },
