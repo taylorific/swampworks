@@ -14,6 +14,6 @@ table is kept up to date by the
 | Extension | Description | Contents | Version | Registry |
 | --------- | ----------- | -------- | ------- | -------- |
 | [@taylor/roam-graph](roam/) | Periodic reviews for a Roam Research graph: weekly summaries of the Activities block on your daily notes, monthly rollups of the weeklies, quarterly rollups of the monthlies, and a yearly rollup of the quarterlies. | 1 model, 1 workflow, 1 skill | `2026.10.11.1` | [`2026.10.11.1`](https://swamp-club.com/extensions/@taylor/roam-graph) |
-| [@taylor/slidev](slidev/) | Work on Slidev decks entirely inside a container (boxcutter/slidev by default) with Docker or Apple's container CLI, so the host needs no Node. | 1 model, 1 skill | `2026.10.11.1` | [`2026.10.11.1`](https://swamp-club.com/extensions/@taylor/slidev) |
+| [@taylor/slidev](slidev/) | Work on Slidev decks entirely inside a container (boxcutter/slidev by default) with Docker or Apple's container CLI, so the host needs no Node. | 1 model, 1 skill | `2026.10.11.2` | [`2026.10.11.1`](https://swamp-club.com/extensions/@taylor/slidev) |
 | [@taylor/webshot](webshot/) | Full-page screenshots of web pages (PNG, JPEG, WebP). | 1 model | `2026.10.11.1` | [`2026.10.11.1`](https://swamp-club.com/extensions/@taylor/webshot) |
 <!-- EXTENSIONS_END -->
