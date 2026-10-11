@@ -1,0 +1,17 @@
+{
+  "@keeb/anthropic": {
+    "version": "2026.07.18.1",
+    "pulledAt": "2026-10-11T17:12:13.451Z",
+    "files": [
+      ".claude/skills/anthropic",
+      ".swamp/bundles/a7871b4f/claude.js",
+      ".swamp/pulled-extensions/@keeb/anthropic/files/LICENSE.txt",
+      ".swamp/pulled-extensions/@keeb/anthropic/files/README.md",
+      ".swamp/pulled-extensions/@keeb/anthropic/manifest.yaml",
+      ".swamp/pulled-extensions/@keeb/anthropic/models/claude.ts"
+    ],
+    "checksum": "d7e97e7c4afc91c7708cc868970fdb8bc36474de8d472ceacab80ad568dfe212",
+    "filesChecksum": "0fb4dc0fa6472e9be98968550f63773c90a0db03eb358a6ba31d5571c9297caa",
+    "serverUrl": "https://swamp-club.com"
+  }
+}
