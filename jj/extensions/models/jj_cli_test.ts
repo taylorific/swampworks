@@ -87,14 +87,16 @@ function fakeConfig(jj: string, store: Record<string, string> = {}): Handler {
 }
 
 async function runMethod(
-  method: "install" | "configure" | "sync",
+  method: "install" | "uninstall" | "configure" | "sync",
   seams: Record<string, unknown>,
   globals: Record<string, unknown> = {},
   args: Record<string, unknown> = {},
+  stored: Record<string, Record<string, unknown>> = {},
 ) {
   const test = createModelTestContext({
     globalArgs: model.globalArguments.parse(globals),
     methodName: method,
+    storedResources: stored,
   });
   const m = model.methods[method];
   await m.execute(
@@ -264,6 +266,7 @@ Deno.test("install downloads, verifies and installs the release", async () => {
     assertEquals(out.installation.action, "installed");
     assertEquals(out.installation.method, "release");
     assertEquals(out.installation.path, dest);
+    assertEquals(out.installation.managed, { method: "release", path: dest });
     assertEquals((await Deno.stat(dest)).mode! & 0o777, 0o755);
     assertEquals(fetched.length, 2);
     assert(calls.some((c) => c.startsWith("tar -xf ")));
@@ -489,4 +492,104 @@ Deno.test("sync writes nothing when jj can't read its config", async () => {
     "Config error",
   );
   assertEquals(test.getWrittenResources(), []);
+});
+
+/** A stored installation record saying this model installed jj. */
+const stored = (method: string, path: string) => ({
+  installation: { managed: { method, path } },
+});
+
+Deno.test("install and sync keep what an earlier install managed", async () => {
+  const { run } = fakeRun(jjAt({ jj: "0.46.0" }), fakeConfig("jj"));
+  const prev = stored("brew", "/opt/homebrew/bin/jj");
+  for (const m of ["install", "sync"] as const) {
+    const out = await runMethod(
+      m,
+      { _run: run, _platform: linux() },
+      {},
+      {},
+      prev,
+    );
+    assertEquals(out.installation.managed, prev.installation.managed);
+  }
+});
+
+Deno.test("uninstall removes the release build this model installed", async () => {
+  const dir = await Deno.makeTempDir();
+  try {
+    const path = joinPath("linux", dir, "jj");
+    await Deno.writeTextFile(path, "#!/bin/sh");
+    const { run } = fakeRun((cmd, args) => {
+      try {
+        Deno.statSync(cmd);
+      } catch {
+        return undefined;
+      }
+      return jjAt({ [path]: "0.46.0" })(cmd, args);
+    });
+    const out = await runMethod(
+      "uninstall",
+      { _run: run, _platform: linux() },
+      { installDir: dir },
+      {},
+      stored("release", path),
+    );
+    await assertRejects(() => Deno.stat(path), Deno.errors.NotFound);
+    assertEquals(out.installation.action, "removed");
+    assertEquals(out.installation.installed, false);
+    assertEquals(out.installation.managed, null);
+  } finally {
+    await Deno.remove(dir, { recursive: true });
+  }
+});
+
+Deno.test("uninstall leaves a file that isn't jj alone", async () => {
+  const dir = await Deno.makeTempDir();
+  try {
+    const path = joinPath("linux", dir, "jj");
+    await Deno.writeTextFile(path, "something else");
+    const { run } = fakeRun();
+    await assertRejects(
+      () =>
+        runMethod(
+          "uninstall",
+          { _run: run, _platform: linux() },
+          {},
+          {},
+          stored("release", path),
+        ),
+      Error,
+      "is not a jj binary",
+    );
+    assertEquals(await Deno.readTextFile(path), "something else");
+  } finally {
+    await Deno.remove(dir, { recursive: true });
+  }
+});
+
+Deno.test("uninstall removes the Homebrew package it installed", async () => {
+  let installed = true;
+  const { run, calls } = fakeRun((cmd, args) => {
+    if (cmd === "brew" && args[0] === "list") return installed ? ok() : missing;
+    if (cmd === "brew" && args[0] === "uninstall") {
+      installed = false;
+      return ok();
+    }
+  });
+  const out = await runMethod(
+    "uninstall",
+    { _run: run, _platform: mac },
+    {},
+    {},
+    stored("brew", "/opt/homebrew/bin/jj"),
+  );
+  assert(calls.includes("brew uninstall jj"));
+  assertEquals(out.installation.action, "removed");
+});
+
+Deno.test("uninstall touches nothing this model didn't install", async () => {
+  const { run, calls } = fakeRun(jjAt({ jj: "0.46.0" }));
+  const out = await runMethod("uninstall", { _run: run, _platform: mac });
+  assertEquals(out.installation.action, "exists");
+  assert(!calls.some((c) => c.startsWith("brew") || c.startsWith("winget")));
 });

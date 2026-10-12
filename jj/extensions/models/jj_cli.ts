@@ -5,7 +5,8 @@ import { z } from "npm:zod@4";
 // jj on the machine if it is missing: with Homebrew on macOS and winget on
 // Windows when they are there, otherwise from the jj-vcs/jj GitHub release,
 // whose archive is checked against the SHA-256 digest GitHub publishes for it.
-// `configure` sets user-level config (user.name, user.email and any other
+// `uninstall` removes only what `install` put there, which the installation
+// resource remembers as `managed`. `configure` sets user-level config (user.name, user.email and any other
 // keys) with `jj config set --user`, touching only keys whose value differs,
 // and restores the config file if jj rejects the result. `sync` reads the
 // installed version and config without changing anything and records where
@@ -66,12 +67,20 @@ const InstallArgsSchema = z.object({
 });
 type InstallArgs = z.infer<typeof InstallArgsSchema>;
 
+const ManagedSchema = z.object({
+  method: z.enum(["release", "brew", "winget"]),
+  path: z.string(),
+});
+/** The jj this model installed, which uninstall may remove. */
+export type Managed = z.infer<typeof ManagedSchema>;
+
 const InstallationSchema = z.object({
   installed: z.boolean(),
   path: z.string().nullable(),
   version: z.string().nullable(),
   method: z.enum(["release", "brew", "winget"]).nullable(),
-  action: z.enum(["installed", "updated", "exists", "missing"]),
+  action: z.enum(["installed", "updated", "exists", "missing", "removed"]),
+  managed: ManagedSchema.nullable(),
   os: z.string(),
   arch: z.string(),
   drift: z.array(z.string()),
@@ -100,6 +109,7 @@ interface Context {
     name: string,
     data: Record<string, unknown>,
   ) => Promise<{ name: string }>;
+  readResource: (name: string) => Promise<Record<string, unknown> | null>;
 }
 
 interface CheckContext {
@@ -554,6 +564,7 @@ function installation(
   method: InstallMethod | null,
   action: Installation["action"],
   drift: string[],
+  managed: Managed | null,
 ): Installation {
   return {
     installed: found !== null,
@@ -561,11 +572,55 @@ function installation(
     version: found?.version ?? null,
     method,
     action,
+    managed,
     os: p.os,
     arch: p.arch,
     drift,
     checkedAt: new Date().toISOString(),
   };
+}
+
+/** What an earlier install recorded as installed by this model. */
+async function previousManaged(context: Context): Promise<Managed | null> {
+  const prev = await context.readResource("installation");
+  const parsed = ManagedSchema.safeParse(prev?.managed);
+  return parsed.success ? parsed.data : null;
+}
+
+/**
+ * Removes a jj this model installed. Something already gone counts as
+ * removed; a file at a release path that isn't jj is left alone.
+ */
+export async function removeManaged(m: Managed, run: Run): Promise<void> {
+  if (m.method === "release") {
+    try {
+      await Deno.lstat(m.path);
+    } catch (err) {
+      if (err instanceof Deno.errors.NotFound) return;
+      throw err;
+    }
+    const r = await run(m.path, ["--version"]);
+    if (r.code !== 0 || !parseVersion(r.stdout)) {
+      throw new Error(`${m.path} is not a jj binary; left it alone`);
+    }
+    await Deno.remove(m.path);
+  } else if (m.method === "brew") {
+    if ((await run("brew", ["list", "--versions", "jj"])).code !== 0) return;
+    check(await run("brew", ["uninstall", "jj"]), "brew uninstall jj");
+  } else {
+    const flags = [
+      "--id",
+      WINGET_ID,
+      "--exact",
+      "--accept-source-agreements",
+      "--disable-interactivity",
+    ];
+    if ((await run("winget", ["list", ...flags])).code !== 0) return;
+    check(
+      await run("winget", ["uninstall", ...flags, "--silent"]),
+      "winget uninstall",
+    );
+  }
 }
 
 /** Pre-flight: the platform can use the chosen install method. */
@@ -695,7 +750,14 @@ export const model = {
           const handle = await context.writeResource(
             "installation",
             "installation",
-            installation(p, before, null, "exists", versionDrift(g, before)),
+            installation(
+              p,
+              before,
+              null,
+              "exists",
+              versionDrift(g, before),
+              await previousManaged(context),
+            ),
           );
           return { dataHandles: [handle] };
         }
@@ -776,7 +838,47 @@ export const model = {
         const handle = await context.writeResource(
           "installation",
           "installation",
-          installation(p, after, method, action, drift),
+          installation(p, after, method, action, drift, {
+            method,
+            path: after.path,
+          }),
+        );
+        return { dataHandles: [handle] };
+      },
+    },
+    uninstall: {
+      description:
+        "Remove the jj this model installed (the release build, or the Homebrew or winget package); a jj installed any other way is left alone",
+      arguments: z.object({}),
+      execute: async (args: Seams, context: Context) => {
+        const g = context.globalArgs;
+        const { run, p } = seams(args);
+        const managed = await previousManaged(context);
+        if (managed) {
+          context.logger.info("Removing jj installed with {method} at {path}", {
+            method: managed.method,
+            path: managed.path,
+          });
+          await removeManaged(managed, run);
+        } else {
+          context.logger.warn(
+            "This model hasn't installed jj, so there is nothing to remove",
+          );
+        }
+        const found = await findJj(run, jjCandidates(g, p));
+        if (found) {
+          context.logger.warn("jj {version} is still at {path}", {
+            version: found.version,
+            path: found.path,
+          });
+        } else {
+          context.logger.info("jj is no longer installed");
+        }
+        const action = managed ? "removed" : found ? "exists" : "missing";
+        const handle = await context.writeResource(
+          "installation",
+          "installation",
+          installation(p, found, null, action, [], null),
         );
         return { dataHandles: [handle] };
       },
@@ -903,7 +1005,14 @@ export const model = {
           await context.writeResource(
             "installation",
             "installation",
-            installation(p, found, null, found ? "exists" : "missing", drift),
+            installation(
+              p,
+              found,
+              null,
+              found ? "exists" : "missing",
+              drift,
+              await previousManaged(context),
+            ),
           ),
         ];
         if (config) {

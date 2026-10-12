@@ -26,12 +26,15 @@ differ.
 | Method      | What it does                                                                                               |
 | ----------- | ---------------------------------------------------------------------------------------------------------- |
 | `install`   | Install jj if it's missing or isn't the pinned `version`; pass `upgrade=true` to also update to the latest |
+| `uninstall` | Remove the jj this model installed; a jj installed any other way is left alone                             |
 | `configure` | Set `userName`, `userEmail` and `settings` with `jj config set --user`, only for keys that differ          |
 | `sync`      | Read the installed jj and its config and record drift from the arguments; changes nothing                  |
 
 The `installation` resource records `installed`, `path`, `version`, the `method`
-this run used, `os`, `arch`, `drift`, and `action`: `installed`, `updated`,
-`exists`, or `missing` when `sync` finds no jj.
+this run used, `os`, `arch`, `drift`, `managed`, and `action`: `installed`,
+`updated`, `exists`, `removed`, or `missing` when no jj is found. `managed` is
+the `method` and `path` of the jj this model installed, or `null` if it hasn't
+installed one; `sync` and an `install` that changes nothing keep it as it was.
 
 The `config` resource records the user config file's `path`, the current
 `settings` for every key the model manages, the keys `configure` `changed`, and
@@ -56,6 +59,21 @@ so your shell finds jj; swamp finds it either way.
 To find jj, the model tries `jjPath` alone if it's set, otherwise `installDir`,
 then `jj` on `PATH`, then where Homebrew and winget put it. `installDir` comes
 first so a pinned release build wins over an older jj on `PATH`.
+
+## Uninstalling
+
+`uninstall` removes only what `managed` names, so a jj you installed yourself,
+or one that was already there when `install` first ran, is never touched:
+
+- `release`: deletes the binary at `managed.path`, after checking that it still
+  answers `jj --version`; any other file there is left alone and the method
+  fails. `installDir` itself stays.
+- `brew`: `brew uninstall jj`, if Homebrew still has it.
+- `winget`: `winget uninstall --id jj-vcs.jj`, if winget still has it.
+
+Something already gone counts as removed, so `uninstall` is safe to repeat. If
+another jj is still found afterwards (say a distro package), it's reported as a
+warning and recorded as `path`. The user config file is kept.
 
 ## Configuration
 
@@ -112,6 +130,12 @@ swamp model method run jj sync
 swamp model method run jj install --input upgrade=true
 ```
 
+To remove it again:
+
+```sh
+swamp model method run jj uninstall
+```
+
 To pin a version on any platform, use the release build:
 
 ```sh
@@ -139,6 +163,11 @@ brew --prefix
 winget list --id jj-vcs.jj --exact
 winget install --id jj-vcs.jj --exact --silent ... [--version <v> --force]
 winget upgrade --id jj-vcs.jj --exact --silent ...
+
+# uninstall
+<managed.path> --version                                       # release: is it still jj? then delete it
+brew uninstall jj
+winget uninstall --id jj-vcs.jj --exact --silent ...
 
 # configure / sync
 jj config path --user
