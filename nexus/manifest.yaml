@@ -1,10 +1,11 @@
 manifestVersion: 1
 name: "@taylor/nexus"
-version: "2026.10.11.2"
-description: "Run a Sonatype Nexus Repository instance with Docker or Apple's container CLI, configured far enough that the onboarding wizard never appears: give it an admin username and password and it replaces the generated password, accepts the Community Edition EULA and sets anonymous access. Pre-flight checks confirm the runtime is up, the port is free and memory is sufficient. Data lives in a named volume; stop or remove the container again."
+version: "2026.10.11.3"
+description: "Run a Sonatype Nexus Repository instance with Docker or Apple's container CLI, configured far enough that the onboarding wizard never appears, then declare what goes in it: realms, blob stores, roles, users, and apt, docker, npm, pypi and raw repositories (hosted, proxy and group). apply creates and updates them in dependency order and can prune what is not declared; sync reports drift without changing anything. Pre-flight checks catch a stopped runtime, a taken port and typos in privileges or references before anything changes."
 repository: "https://github.com/taylorific/swampworks"
 models:
   - nexus_instance.ts
+  - nexus_config.ts
 additionalFiles:
   - README.md
   - LICENSE
@@ -14,3 +15,6 @@ labels:
   - nexus
   - artifact-repository
   - docker
+  - apt
+  - npm
+  - pypi
