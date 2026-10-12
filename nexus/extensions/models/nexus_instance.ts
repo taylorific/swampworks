@@ -16,6 +16,7 @@ import { z } from "npm:zod@4";
 const NAME = /^[A-Za-z0-9][A-Za-z0-9_.-]*$/;
 const DATA_DIR = "/nexus-data";
 const BOOTSTRAP_PASSWORD = `${DATA_DIR}/admin.password`;
+const PROPERTIES_FILE = `${DATA_DIR}/etc/nexus.properties`;
 const NEXUS_PORT = 8081;
 const NEXUS_UID = "200:200";
 const BUILTIN_ADMIN = "admin";
@@ -53,6 +54,18 @@ const GlobalArgsSchema = z.object({
   memory: z.string().regex(/^\d+[mMgG]$/).optional().describe(
     `Memory limit such as 4g or 6144m; at least ${MIN_MEMORY_MIB}m. Defaults to no limit on docker and ${APPLE_DEFAULT_MEMORY} on container`,
   ),
+  ports: z.array(z.number().int().min(1).max(65535)).default([]).describe(
+    "Extra container ports to publish on the same host port, e.g. [10080, 10443] for docker repository connectors",
+  ),
+  properties: z.record(
+    z.string().regex(/^[A-Za-z0-9._-]+$/),
+    z.union([z.string(), z.number(), z.boolean()]).refine(
+      (v) => !/[\r\n]/.test(String(v)),
+      "values cannot contain line breaks",
+    ),
+  ).default({}).describe(
+    "Settings written to /nexus-data/etc/nexus.properties, e.g. { nexus.skipDefaultRepositories: true }; the file is replaced, and Nexus restarted when it changes. Empty leaves the file alone",
+  ),
   adminUsername: z.string().regex(NAME).default(BUILTIN_ADMIN).describe(
     "Administrator to sign in as; any name but admin is created with the nx-admin role and the built-in admin is disabled",
   ),
@@ -83,6 +96,7 @@ const InstanceSchema = z.object({
     "removed",
     "unchanged",
     "synced",
+    "restarted",
   ]),
   nexusReady: z.boolean().nullable().describe(
     "Whether Nexus answered its status endpoint; null when the container was not checked",
@@ -134,111 +148,26 @@ export interface CliResult {
 /** Runs the runtime CLI with the given arguments. Injectable for tests. */
 export type Cli = (args: string[]) => Promise<CliResult>;
 
-/** Returns true once Nexus answers at the given base URL. Injectable for tests. */
-export type Probe = (url: string) => Promise<boolean>;
-
-/** One request to the Nexus REST API under /service/rest. */
-export interface ApiRequest {
-  method: "GET" | "PUT" | "POST";
-  path: string;
-  user: string;
-  password: string;
-  json?: unknown;
-  text?: string;
-}
-
-/** Status and body of one Nexus REST API response. */
-export interface ApiResponse {
-  status: number;
-  body: string;
-}
-
-/** Calls the Nexus REST API. Injectable for tests. */
-export type Api = (req: ApiRequest) => Promise<ApiResponse>;
-
-/** Asks Nexus's status endpoint whether it is ready to serve requests. */
-export const statusProbe: Probe = async (url) => {
-  try {
-    const res = await fetch(`${url}/service/rest/v1/status`, {
-      signal: AbortSignal.timeout(5000),
-    });
-    await res.body?.cancel();
-    return res.ok;
-  } catch {
-    return false;
-  }
-};
-
-/** HTTP basic credentials, UTF-8 encoded so any password works. */
-export function basicAuth(user: string, password: string): string {
-  const bytes = new TextEncoder().encode(`${user}:${password}`);
-  return `Basic ${btoa(String.fromCharCode(...bytes))}`;
-}
-
-/** Calls the Nexus REST API at `url` with basic auth. */
-export function apiClient(url: string): Api {
-  return async (req) => {
-    const headers: Record<string, string> = {
-      Authorization: basicAuth(req.user, req.password),
-    };
-    let body: string | undefined;
-    if (req.json !== undefined) {
-      headers["Content-Type"] = "application/json";
-      body = JSON.stringify(req.json);
-    } else if (req.text !== undefined) {
-      headers["Content-Type"] = "text/plain";
-      body = req.text;
-    }
-    try {
-      const res = await fetch(`${url}/service/rest${req.path}`, {
-        method: req.method,
-        headers,
-        body,
-        signal: AbortSignal.timeout(30000),
-      });
-      return { status: res.status, body: await res.text() };
-    } catch (err) {
-      throw new Error(
-        `${req.method} ${url}/service/rest${req.path} failed: ${
-          (err as Error).message
-        }`,
-      );
-    }
-  };
-}
-
-/**
- * Polls `probe` until it succeeds or `timeoutMs` passes. `alive`, if given,
- * is asked after each miss so a container that crashed fails fast instead of
- * waiting out the timeout.
- */
-export async function waitUntilReady(
-  probe: Probe,
-  url: string,
-  timeoutMs: number,
-  intervalMs = 2000,
-  alive?: () => Promise<string | null>,
-): Promise<void> {
-  const deadline = Date.now() + timeoutMs;
-  while (!(await probe(url))) {
-    const died = alive ? await alive() : null;
-    if (died) throw new Error(died);
-    if (Date.now() >= deadline) {
-      throw new Error(
-        `Nexus at ${url} was not ready after ${timeoutMs / 1000}s`,
-      );
-    }
-    await new Promise((r) => setTimeout(r, intervalMs));
-  }
-}
-
-/** Fails with Nexus's message unless the response status is 2xx. */
-function expectOk(r: ApiResponse, what: string): ApiResponse {
-  if (r.status < 200 || r.status > 299) {
-    throw new Error(`${what} failed: HTTP ${r.status} ${r.body}`.trim());
-  }
-  return r;
-}
+export {
+  type Api,
+  apiClient,
+  type ApiRequest,
+  type ApiResponse,
+  basicAuth,
+  expectOk,
+  type Probe,
+  statusProbe,
+  waitUntilReady,
+} from "./_lib/nexus_api.ts";
+import {
+  type Api,
+  apiClient,
+  type ApiRequest,
+  expectOk,
+  type Probe,
+  statusProbe,
+  waitUntilReady,
+} from "./_lib/nexus_api.ts";
 
 /** Runs a container runtime CLI and captures its output. */
 export function cliRunner(bin: string): Cli {
@@ -277,6 +206,8 @@ export interface ContainerInfo {
   image: string;
   /** Host port published for Nexus's 8081, or null if none. */
   hostPort: number | null;
+  /** Other published container ports, sorted. */
+  extraPorts: number[];
   /** Times the runtime restarted it after it exited (Docker only). */
   restarts: number;
 }
@@ -311,6 +242,11 @@ export const RUNTIME_ARGS: Record<Runtime, {
         running: c.State?.Running === true && c.State?.Restarting !== true,
         image: String(c.Config?.Image ?? ""),
         hostPort: bound?.HostPort ? Number(bound.HostPort) : null,
+        extraPorts: otherPorts(
+          Object.entries(c.HostConfig?.PortBindings ?? {})
+            .filter(([, b]) => b?.length)
+            .map(([key]) => Number(key.split("/")[0])),
+        ),
         restarts: Number(c.RestartCount ?? 0),
       };
     },
@@ -342,6 +278,11 @@ export const RUNTIME_ARGS: Record<Runtime, {
         running: c.status?.state === "running",
         image: String(c.configuration?.image?.reference ?? ""),
         hostPort: bound?.hostPort ?? null,
+        extraPorts: otherPorts(
+          (c.configuration?.publishedPorts ?? []).map((p) =>
+            Number(p.containerPort)
+          ),
+        ),
         restarts: 0,
       };
     },
@@ -361,6 +302,13 @@ export const RUNTIME_ARGS: Record<Runtime, {
       "Apple's container system is not running; run `container system start`",
   },
 };
+
+/** Container ports other than Nexus's own, sorted and without repeats. */
+export function otherPorts(ports: number[]): number[] {
+  return [...new Set(ports.filter((p) => p !== NEXUS_PORT))].sort((a, b) =>
+    a - b
+  );
+}
 
 /** Fails with the runtime's message when a call did not succeed. */
 function check(r: CliResult, what: string): string {
@@ -510,6 +458,14 @@ export function containerDrift(
       } but port is ${g.port}`,
     );
   }
+  const want = otherPorts(g.ports);
+  if (JSON.stringify(current.extraPorts) !== JSON.stringify(want)) {
+    drift.push(
+      `${g.containerName} publishes extra ports [${
+        current.extraPorts.join(", ")
+      }] but ports is [${want.join(", ")}]`,
+    );
+  }
   return drift;
 }
 
@@ -541,23 +497,21 @@ export async function checkPortAvailable(
 ): Promise<CheckResult> {
   const current = await inspectForCheck(g, cli);
   if (current !== null) return { pass: true }; // ours, or runtime-ready fails
-  let isFree: boolean;
-  try {
-    isFree = await free(g.bindAddress, g.port);
-  } catch (err) {
-    return {
-      pass: false,
-      errors: [
-        `Cannot bind ${g.bindAddress}:${g.port}: ${(err as Error).message}`,
-      ],
-    };
+  const errors: string[] = [];
+  for (const port of [g.port, ...otherPorts(g.ports)]) {
+    try {
+      if (!await free(g.bindAddress, port)) {
+        errors.push(
+          `Port ${port} on ${g.bindAddress} is already in use; stop what is using it or choose another port`,
+        );
+      }
+    } catch (err) {
+      errors.push(
+        `Cannot bind ${g.bindAddress}:${port}: ${(err as Error).message}`,
+      );
+    }
   }
-  return isFree ? { pass: true } : {
-    pass: false,
-    errors: [
-      `Port ${g.port} on ${g.bindAddress} is already in use; stop what is using it or choose another port`,
-    ],
-  };
+  return errors.length ? { pass: false, errors } : { pass: true };
 }
 
 /** Pre-flight: a memory limit, if any, leaves room for Nexus's JVM. */
@@ -584,31 +538,68 @@ export function runArgs(g: GlobalArgs): string[] {
     ...(memory ? ["--memory", memory] : []),
     "--publish",
     `${g.bindAddress}:${g.port}:${NEXUS_PORT}`,
+    ...otherPorts(g.ports).flatMap((p) => [
+      "--publish",
+      `${g.bindAddress}:${p}:${p}`,
+    ]),
     "--volume",
     `${g.volume}:${DATA_DIR}`,
     g.image,
   ];
 }
 
+/** The nexus.properties the arguments ask for, or "" to leave it alone. */
+export function propertiesContent(g: GlobalArgs): string {
+  const keys = Object.keys(g.properties).sort();
+  if (!keys.length) return "";
+  return [
+    "# Managed by @taylor/nexus; changes here are overwritten by start",
+    ...keys.map((k) => `${k}=${g.properties[k]}`),
+    "",
+  ].join("\n");
+}
+
+/** Shell that writes $1 to nexus.properties, owned by the nexus user. */
+const WRITE_PROPERTIES =
+  `mkdir -p ${DATA_DIR}/etc && printf '%s' "$1" > ${PROPERTIES_FILE} && chown -R ${NEXUS_UID} ${DATA_DIR}/etc`;
+
 /**
- * `run` arguments that hand the volume's root to the nexus user. Docker
- * copies the image's ownership into a new volume; Apple's container creates
- * it owned by root, and Nexus then cannot write its data.
+ * `run` arguments for a throwaway root container that prepares the volume
+ * before Nexus runs on it: hands its root to the nexus user (Docker copies
+ * the image's ownership into a new volume, Apple's container creates it
+ * owned by root) and writes nexus.properties, which Nexus reads at boot.
  */
-export function chownArgs(g: GlobalArgs): string[] {
+export function prepareArgs(g: GlobalArgs): string[] {
+  const content = propertiesContent(g);
+  const script = `chown ${NEXUS_UID} ${DATA_DIR}` +
+    (content ? ` && ${WRITE_PROPERTIES}` : "");
   return [
     "run",
     "--rm",
     "--user",
     "root",
     "--entrypoint",
-    "chown",
+    "sh",
     "--volume",
     `${g.volume}:${DATA_DIR}`,
     g.image,
-    NEXUS_UID,
-    DATA_DIR,
+    "-c",
+    script,
+    "sh",
+    content,
   ];
+}
+
+/** Whether a running container's nexus.properties differs from the arguments. */
+export async function propertiesDiffer(
+  g: GlobalArgs,
+  cli: Cli,
+): Promise<boolean> {
+  const want = propertiesContent(g);
+  if (!want) return false;
+  const r = await cli(["exec", g.containerName, "cat", PROPERTIES_FILE]);
+  // cliRunner trims output, so compare trimmed.
+  return r.code !== 0 || r.stdout.trim() !== want.trim();
 }
 
 /** Base URL of the Nexus UI, as reachable from this host. */
@@ -888,13 +879,44 @@ function record(
 }
 
 interface CheckContext {
-  globalArgs: GlobalArgs;
+  globalArgs: unknown;
+}
+
+/** True when any string in `v` is still a `${{ ... }}` expression. */
+function unresolved(v: unknown): boolean {
+  if (typeof v === "string") return v.includes("${{");
+  if (Array.isArray(v)) return v.some(unresolved);
+  if (typeof v === "object" && v !== null) {
+    return Object.values(v).some(unresolved);
+  }
+  return false;
+}
+
+/**
+ * Runs a check on the arguments with their defaults applied: `swamp model
+ * validate` hands checks the arguments as written, without defaults.
+ */
+function withArgs(
+  check: (g: GlobalArgs) => Promise<CheckResult>,
+): (ctx: CheckContext) => Promise<CheckResult> {
+  return (ctx) => {
+    // An argument swamp has not resolved yet (validate leaves data.latest()
+    // expressions as written) cannot be judged; method runs check it.
+    if (unresolved(ctx.globalArgs)) return Promise.resolve({ pass: true });
+    const parsed = GlobalArgsSchema.safeParse(ctx.globalArgs);
+    return parsed.success ? check(parsed.data) : Promise.resolve({
+      pass: false,
+      errors: parsed.error.issues.map((i) =>
+        `${i.path.join(".")}: ${i.message}`
+      ),
+    });
+  };
 }
 
 /** The `@taylor/nexus/instance` swamp model type. */
 export const model = {
   type: "@taylor/nexus/instance",
-  version: "2026.10.11.2",
+  version: "2026.10.11.3",
   globalArguments: GlobalArgsSchema,
   upgrades: [
     {
@@ -907,6 +929,12 @@ export const model = {
           ? { ...rest, runtimePath: dockerPath }
           : rest;
       },
+    },
+    {
+      toVersion: "2026.10.11.3",
+      description:
+        "Add ports and properties; both default to empty, which keeps the old behaviour",
+      upgradeAttributes: (old: Record<string, unknown>) => old,
     },
   ],
   resources: {
@@ -921,38 +949,33 @@ export const model = {
     "runtime-ready": {
       description: "The container runtime CLI is installed and running",
       labels: ["live"],
-      execute: (ctx: CheckContext) =>
-        checkRuntimeReady(ctx.globalArgs, cliFor(ctx.globalArgs)),
+      execute: withArgs((g) => checkRuntimeReady(g, cliFor(g))),
     },
     "existing-container-is-nexus": {
       description:
         "A container that already has containerName runs a Nexus image, so it is safe to start, stop or delete",
       labels: ["live"],
-      execute: (ctx: CheckContext) =>
-        checkExistingIsNexus(ctx.globalArgs, cliFor(ctx.globalArgs)),
+      execute: withArgs((g) => checkExistingIsNexus(g, cliFor(g))),
     },
     "existing-container-matches": {
       description:
         "An existing Nexus container was created with this image and port, so start does not silently ignore a change",
       labels: ["live"],
       appliesTo: ["start"],
-      execute: (ctx: CheckContext) =>
-        checkExistingMatches(ctx.globalArgs, cliFor(ctx.globalArgs)),
+      execute: withArgs((g) => checkExistingMatches(g, cliFor(g))),
     },
     "port-available": {
       description:
         "The host port is free, unless the Nexus container already holds it",
       labels: ["live"],
       appliesTo: ["start"],
-      execute: (ctx: CheckContext) =>
-        checkPortAvailable(ctx.globalArgs, cliFor(ctx.globalArgs)),
+      execute: withArgs((g) => checkPortAvailable(g, cliFor(g))),
     },
     "memory-sufficient": {
       description: `The memory limit, if any, is at least ${MIN_MEMORY_MIB}m`,
       labels: ["policy"],
       appliesTo: ["start"],
-      execute: (ctx: CheckContext) =>
-        Promise.resolve(checkMemory(ctx.globalArgs)),
+      execute: withArgs((g) => Promise.resolve(checkMemory(g))),
     },
   },
   methods: {
@@ -986,8 +1009,8 @@ export const model = {
             image: g.image,
             runtime: g.runtime,
           });
-          if (g.runtime === "container") {
-            check(await cli(chownArgs(g)), `Preparing volume ${g.volume}`);
+          if (g.runtime === "container" || propertiesContent(g)) {
+            check(await cli(prepareArgs(g)), `Preparing volume ${g.volume}`);
           }
           check(await cli(runArgs(g)), `${g.runtime} run ${g.image}`);
           current = await inspect(g, cli);
@@ -997,11 +1020,40 @@ export const model = {
           action = "created";
         } else if (!current.running) {
           context.logger.info("Starting {name}", { name: g.containerName });
+          if (propertiesContent(g)) {
+            check(await cli(prepareArgs(g)), `Preparing volume ${g.volume}`);
+          }
           check(
             await cli(["start", g.containerName]),
             `${g.runtime} start ${g.containerName}`,
           );
           action = "started";
+        } else if (await propertiesDiffer(g, cli)) {
+          context.logger.info(
+            "Rewriting nexus.properties and restarting {name}",
+            { name: g.containerName },
+          );
+          check(
+            await cli([
+              "exec",
+              g.containerName,
+              "sh",
+              "-c",
+              WRITE_PROPERTIES,
+              "sh",
+              propertiesContent(g),
+            ]),
+            "Writing nexus.properties",
+          );
+          check(
+            await cli(["stop", "--time", "120", g.containerName]),
+            `${g.runtime} stop ${g.containerName}`,
+          );
+          check(
+            await cli(["start", g.containerName]),
+            `${g.runtime} start ${g.containerName}`,
+          );
+          action = "restarted";
         } else {
           action = "unchanged";
         }
@@ -1164,12 +1216,21 @@ export const model = {
             args._api ?? apiClient(url),
             args._probe ?? statusProbe,
           );
+          const properties = await propertiesDiffer(g, cli)
+            ? [
+              "nexus.properties differs from properties; start rewrites it and restarts Nexus",
+            ]
+            : [];
           data = record(g, {
             containerId: current.id,
             state: "running",
             action: "synced",
             ...seen,
-            drift: [...containerDrift(g, current), ...seen.drift],
+            drift: [
+              ...containerDrift(g, current),
+              ...properties,
+              ...seen.drift,
+            ],
           });
         }
 
