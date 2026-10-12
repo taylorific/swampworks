@@ -152,14 +152,14 @@ Deno.test("configDrift lists only keys that differ", () => {
 Deno.test("jjCandidates covers PATH, installDir, Homebrew and winget", () => {
   const g = model.globalArguments.parse({});
   assertEquals(jjCandidates(g, mac), [
-    "jj",
     "/Users/me/.local/bin/jj",
+    "jj",
     "/opt/homebrew/bin/jj",
     "/usr/local/bin/jj",
   ]);
   assertEquals(jjCandidates(g, windows), [
-    "jj",
     "C:\\Users\\me\\AppData\\Local\\Programs\\jj\\jj.exe",
+    "jj",
     "C:\\Users\\me\\AppData\\Local\\Microsoft\\WinGet\\Links\\jj.exe",
   ]);
   assertEquals(
@@ -213,7 +213,7 @@ Deno.test("install leaves an installed jj alone", async () => {
   const out = await runMethod("install", { _run: run, _platform: linux() });
   assertEquals(out.installation.action, "exists");
   assertEquals(out.installation.version, "0.45.0");
-  assertEquals(calls, ["jj --version"]);
+  assertEquals(calls, ["/home/me/.local/bin/jj --version", "jj --version"]);
 });
 
 Deno.test("install downloads, verifies and installs the release", async () => {
@@ -432,4 +432,61 @@ Deno.test("sync reports a missing jj", async () => {
   const out = await runMethod("sync", { _run: run, _platform: linux() });
   assertEquals(out.installation.action, "missing");
   assertEquals(out.config, undefined);
+});
+
+Deno.test("install keeps a pinned release build over an older jj on PATH", async () => {
+  const { run, calls } = fakeRun(
+    jjAt({ jj: "0.40.0", "/home/me/.local/bin/jj": "0.46.0" }),
+  );
+  const out = await runMethod(
+    "install",
+    { _run: run, _platform: linux() },
+    { installMethod: "release", version: "0.46.0" },
+  );
+  assertEquals(out.installation.action, "exists");
+  assertEquals(out.installation.path, "/home/me/.local/bin/jj");
+  assertEquals(calls, ["/home/me/.local/bin/jj --version"]);
+});
+
+Deno.test("install reports GitHub's message when it refuses", async () => {
+  const { run } = fakeRun();
+  const fakeFetch: Fetch = () =>
+    Promise.resolve(
+      Response.json({ message: "API rate limit exceeded" }, { status: 403 }),
+    );
+  const err = await assertRejects(
+    () =>
+      runMethod("install", {
+        _run: run,
+        _fetch: fakeFetch,
+        _platform: linux(),
+      }),
+    Error,
+  );
+  assertStringIncludes(err.message, "API rate limit exceeded");
+  assertStringIncludes(err.message, "60 an hour");
+});
+
+Deno.test("sync writes nothing when jj can't read its config", async () => {
+  const { run } = fakeRun(
+    jjAt({ jj: "0.46.0" }),
+    (_cmd, args) =>
+      args[0] === "config"
+        ? { code: 1, stdout: "", stderr: "Config error: Invalid type" }
+        : undefined,
+  );
+  const test = createModelTestContext({
+    globalArgs: model.globalArguments.parse({ userName: "Me" }),
+    methodName: "sync",
+  });
+  await assertRejects(
+    () =>
+      model.methods.sync.execute(
+        { _run: run, _platform: linux() },
+        test.context as unknown as Ctx,
+      ),
+    Error,
+    "Config error",
+  );
+  assertEquals(test.getWrittenResources(), []);
 });

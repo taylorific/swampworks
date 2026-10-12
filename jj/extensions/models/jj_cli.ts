@@ -208,15 +208,18 @@ function wingetLink(p: Platform): string | undefined {
 }
 
 /**
- * Places to look for jj, in order: jjPath alone if it is set, otherwise jj
- * on PATH, then where the release method, Homebrew and winget put it.
+ * Places to look for jj, in order: jjPath alone if it is set, otherwise
+ * installDir, jj on PATH, then where Homebrew and winget put it. installDir
+ * comes first so that a pinned release build wins over an older jj on PATH;
+ * otherwise install would replace it on every run.
  */
 export function jjCandidates(g: GlobalArgs, p: Platform): string[] {
   if (g.jjPath) return [g.jjPath];
-  const list = ["jj"];
+  const list: string[] = [];
   try {
     list.push(joinPath(p.os, installDir(g, p), binName(p.os)));
   } catch { /* no home directory to look in */ }
+  list.push("jj");
   if (p.os === "darwin") list.push("/opt/homebrew/bin/jj", "/usr/local/bin/jj");
   if (p.os === "linux") list.push("/home/linuxbrew/.linuxbrew/bin/jj");
   const link = p.os === "windows" ? wingetLink(p) : undefined;
@@ -315,8 +318,16 @@ export async function getRelease(
     signal: AbortSignal.timeout(30000),
   });
   if (!res.ok) {
-    await res.body?.cancel();
-    throw new Error(`GitHub returned ${res.status} for ${url}`);
+    let message = (await res.text()).slice(0, 300);
+    try {
+      message = String(JSON.parse(message).message ?? message);
+    } catch { /* not JSON */ }
+    const hint = res.status === 403 || res.status === 429
+      ? " (GitHub rate-limits unauthenticated requests to 60 an hour; try again later)"
+      : "";
+    throw new Error(
+      `GitHub returned ${res.status} for ${url}: ${message}${hint}`,
+    );
   }
   const body = await res.json() as {
     tag_name?: string;
@@ -397,9 +408,16 @@ export async function installRelease(
     // Copy next to the destination and rename over it, so a jj that is
     // running keeps its old file.
     const staged = `${dest}.new`;
-    await Deno.copyFile(joinPath(p.os, tmp, binName(p.os)), staged);
-    if (p.os !== "windows") await Deno.chmod(staged, 0o755);
-    await Deno.rename(staged, dest);
+    try {
+      await Deno.copyFile(joinPath(p.os, tmp, binName(p.os)), staged);
+      if (p.os !== "windows") await Deno.chmod(staged, 0o755);
+      await Deno.rename(staged, dest);
+    } catch (err) {
+      await Deno.remove(staged).catch(() => {});
+      throw new Error(
+        `Installing jj to ${dest} failed: ${(err as Error).message}`,
+      );
+    }
     return dest;
   } finally {
     await Deno.remove(tmp, { recursive: true }).catch(() => {});
@@ -853,15 +871,12 @@ export const model = {
       execute: async (args: Seams, context: Context) => {
         const g = context.globalArgs;
         const { run, p } = seams(args);
+        context.logger.info("Reading jj and its config");
         const found = await findJj(run, jjCandidates(g, p));
         const drift = versionDrift(g, found);
-        const handles = [
-          await context.writeResource(
-            "installation",
-            "installation",
-            installation(p, found, null, found ? "exists" : "missing", drift),
-          ),
-        ];
+        // Read everything before writing anything, so a config jj can't
+        // parse fails the run without leaving half its data behind.
+        let config: Record<string, unknown> | undefined;
         if (found) {
           const wanted = desiredSettings(g);
           const settings = await readSettings(
@@ -869,26 +884,30 @@ export const model = {
             found.path,
             Object.keys(wanted),
           );
-          const configDrifts = configDrift(wanted, settings);
-          for (const item of configDrifts) {
-            context.logger.warn("Drift: {item}", { item });
-          }
-          handles.push(
-            await context.writeResource("config", "config", {
-              path: await userConfigPath(run, found.path),
-              settings,
-              changed: [],
-              drift: configDrifts,
-              checkedAt: new Date().toISOString(),
-            }),
-          );
+          config = {
+            path: await userConfigPath(run, found.path),
+            settings,
+            changed: [],
+            drift: configDrift(wanted, settings),
+            checkedAt: new Date().toISOString(),
+          };
         }
         context.logger.info("jj {version} at {path}", {
           version: found?.version ?? "not installed",
           path: found?.path ?? "-",
         });
-        for (const item of drift) {
+        for (const item of [...drift, ...(config?.drift as string[] ?? [])]) {
           context.logger.warn("Drift: {item}", { item });
+        }
+        const handles = [
+          await context.writeResource(
+            "installation",
+            "installation",
+            installation(p, found, null, found ? "exists" : "missing", drift),
+          ),
+        ];
+        if (config) {
+          handles.push(await context.writeResource("config", "config", config));
         }
         return { dataHandles: handles };
       },

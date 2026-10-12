@@ -53,8 +53,9 @@ on any distribution.
 `release` warns when `installDir` isn't on `PATH`. Add it to your shell profile
 so your shell finds jj; swamp finds it either way.
 
-To find jj, the model tries `jjPath` alone if it's set, otherwise `jj` on
-`PATH`, then `installDir`, then where Homebrew and winget put it.
+To find jj, the model tries `jjPath` alone if it's set, otherwise `installDir`,
+then `jj` on `PATH`, then where Homebrew and winget put it. `installDir` comes
+first so a pinned release build wins over an older jj on `PATH`.
 
 ## Configuration
 
