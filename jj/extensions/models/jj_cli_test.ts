@@ -352,6 +352,59 @@ Deno.test("install upgrades with winget on Windows", async () => {
   assert(calls.some((c) => c.startsWith("winget upgrade --id jj-vcs.jj")));
   assertEquals(out.installation.action, "updated");
   assertEquals(out.installation.version, "0.46.0");
+  assertEquals(out.installation.managed, null);
+});
+
+Deno.test("install does not take over a Homebrew jj it only upgraded", async () => {
+  let version = "0.45.0";
+  const { run, calls } = fakeRun(
+    (cmd, args) => {
+      if (cmd !== "brew") return undefined;
+      if (args[0] === "--version") return ok("Homebrew 4.6.0");
+      if (args[0] === "list") return ok("jj 0.45.0");
+      if (args[0] === "upgrade") {
+        version = "0.46.0";
+        return ok();
+      }
+      if (args[0] === "--prefix") return ok("/opt/homebrew");
+    },
+    (cmd, args) =>
+      cmd === "/opt/homebrew/bin/jj" && args[0] === "--version"
+        ? ok(`jj ${version}`)
+        : undefined,
+  );
+  const out = await runMethod(
+    "install",
+    { _run: run, _platform: mac },
+    {},
+    { upgrade: true },
+  );
+  assert(calls.includes("brew upgrade jj"));
+  assertEquals(out.installation.action, "updated");
+  assertEquals(out.installation.managed, null);
+});
+
+Deno.test("install keeps managing a Homebrew jj it installed earlier", async () => {
+  const { run } = fakeRun(
+    (cmd, args) => {
+      if (cmd !== "brew") return undefined;
+      if (args[0] === "--version") return ok("Homebrew 4.6.0");
+      if (args[0] === "list") return ok("jj 0.45.0");
+      if (args[0] === "upgrade" || args[0] === "--prefix") {
+        return ok("/opt/homebrew");
+      }
+    },
+    jjAt({ "/opt/homebrew/bin/jj": "0.46.0" }),
+  );
+  const prev = stored("brew", "/opt/homebrew/bin/jj");
+  const out = await runMethod(
+    "install",
+    { _run: run, _platform: mac },
+    {},
+    { upgrade: true },
+    prev,
+  );
+  assertEquals(out.installation.managed, prev.installation.managed);
 });
 
 Deno.test("configure sets only keys that differ", async () => {

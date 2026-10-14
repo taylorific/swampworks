@@ -298,8 +298,12 @@ export function repositoryPayload(r: Repository): Json {
       ...(hosted ? { writePolicy: r.writePolicy.toUpperCase() } : {}),
     },
   };
-  if (r.type !== "group" && r.cleanupPolicies.length) {
-    p.cleanup = { policyNames: r.cleanupPolicies };
+  // Optional settings are sent as null when unset, so that removing one from
+  // the declaration shows up as a difference and the update clears it.
+  if (r.type !== "group") {
+    p.cleanup = r.cleanupPolicies.length
+      ? { policyNames: r.cleanupPolicies }
+      : null;
   }
   if (proxy) {
     p.proxy = {
@@ -311,9 +315,9 @@ export function repositoryPayload(r: Repository): Json {
     p.httpClient = {
       blocked: r.blocked,
       autoBlock: r.autoBlock,
-      ...(r.authentication ? { authentication: { ...r.authentication } } : {}),
+      authentication: r.authentication ? { ...r.authentication } : null,
     };
-    if (r.routingRule) p.routingRule = r.routingRule;
+    p.routingRule = r.routingRule ?? null;
   }
   if (r.type === "group") {
     p.group = {
@@ -1066,8 +1070,16 @@ const describeChange = (c: Change) =>
 /** The `@taylor/nexus/config` swamp model type. */
 export const model = {
   type: "@taylor/nexus/config",
-  version: "2026.10.11.3",
+  version: "2026.10.14.1",
   globalArguments: GlobalArgsSchema,
+  upgrades: [
+    {
+      toVersion: "2026.10.14.1",
+      description:
+        "apply clears cleanup policies, routing rules and remote credentials removed from the declaration; no settings changed",
+      upgradeAttributes: (old: Record<string, unknown>) => old,
+    },
+  ],
   resources: {
     config: {
       description: "What apply changed, or what sync found out of date",

@@ -681,8 +681,16 @@ export async function checkJjInstalled(
 /** The `@taylor/jj/cli` swamp model type. */
 export const model = {
   type: "@taylor/jj/cli",
-  version: "2026.10.11.1",
+  version: "2026.10.14.1",
   globalArguments: GlobalArgsSchema,
+  upgrades: [
+    {
+      toVersion: "2026.10.14.1",
+      description:
+        "install no longer records a Homebrew or winget jj it only upgraded as managed; no settings changed",
+      upgradeAttributes: (old: Record<string, unknown>) => old,
+    },
+  ],
   resources: {
     installation: {
       description: "Where jj is installed, its version and how it got there",
@@ -767,6 +775,9 @@ export const model = {
           method,
         });
         let first: string[] = [];
+        // Whether this run put jj there. A Homebrew or winget package that
+        // was already installed stays the user's, so uninstall leaves it.
+        let ours = true;
         if (method === "release") {
           const dir = installDir(g, p);
           first = [
@@ -790,6 +801,7 @@ export const model = {
             (await run("brew", ["list", "--versions", "jj"])).code === 0
               ? "upgrade"
               : "install";
+          ours = verb === "install";
           check(await run("brew", [verb, "jj"]), `brew ${verb} jj`);
           const prefix = await run("brew", ["--prefix"]);
           if (prefix.code === 0) first = [`${prefix.stdout}/bin/jj`];
@@ -802,6 +814,7 @@ export const model = {
             "--accept-source-agreements",
             "--disable-interactivity",
           ])).code === 0;
+          ours = !listed;
           const r = listed && !pinned
             ? await run("winget", ["upgrade", ...WINGET_FLAGS])
             : await run("winget", [
@@ -838,10 +851,16 @@ export const model = {
         const handle = await context.writeResource(
           "installation",
           "installation",
-          installation(p, after, method, action, drift, {
+          installation(
+            p,
+            after,
             method,
-            path: after.path,
-          }),
+            action,
+            drift,
+            ours
+              ? { method, path: after.path }
+              : await previousManaged(context),
+          ),
         );
         return { dataHandles: [handle] };
       },

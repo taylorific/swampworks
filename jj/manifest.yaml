@@ -1,6 +1,7 @@
 manifestVersion: 1
 name: "@taylor/jj"
-version: "2026.10.11.1"
+version: "2026.10.14.1"
+license: AGPL-3.0-only
 description: "Install and configure Jujutsu (jj) on Linux, macOS and Windows: with Homebrew or winget when they are there, otherwise from the GitHub release with its SHA-256 checked. Set user.name, user.email and any other user-level config, changing only keys that differ and restoring the file if jj rejects a value. uninstall removes only the jj it installed. sync reports the installed version and drift from the arguments."
 repository: "https://github.com/taylorific/swampworks"
 models:

@@ -34,7 +34,8 @@ The `installation` resource records `installed`, `path`, `version`, the `method`
 this run used, `os`, `arch`, `drift`, `managed`, and `action`: `installed`,
 `updated`, `exists`, `removed`, or `missing` when no jj is found. `managed` is
 the `method` and `path` of the jj this model installed, or `null` if it hasn't
-installed one; `sync` and an `install` that changes nothing keep it as it was.
+installed one; `sync`, an `install` that changes nothing, and an `install` that
+only upgrades a Homebrew or winget package it didn't install keep it as it was.
 
 The `config` resource records the user config file's `path`, the current
 `settings` for every key the model manages, the keys `configure` `changed`, and

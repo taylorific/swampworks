@@ -652,8 +652,15 @@ export function planCapture(opts: {
  */
 export const model = {
   type: "@taylor/webshot",
-  version: "2026.10.11.1",
+  version: "2026.10.14.1",
   globalArguments: GlobalArgsSchema,
+  upgrades: [
+    {
+      toVersion: "2026.10.14.1",
+      description: "Declares the license in the manifest; no settings changed",
+      upgradeAttributes: (old: Record<string, unknown>) => old,
+    },
+  ],
   files: {
     screenshot: {
       description: "Full-page screenshot (PNG by default; JPEG or WebP)",
