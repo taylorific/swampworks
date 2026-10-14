@@ -476,8 +476,15 @@ function defaultConfigDir(): string {
 /** The `@taylor/swamp-training/deck` swamp behavior type. */
 export const behavior = {
   type: "@taylor/swamp-training/deck",
-  version: "2026.10.14.1",
+  version: "2026.10.14.2",
   globalArguments: GlobalArgsSchema,
+  upgrades: [
+    {
+      toVersion: "2026.10.14.2",
+      description: "Declares the license in the manifest; no settings changed",
+      upgradeAttributes: (old: Record<string, unknown>) => old,
+    },
+  ],
   resources: {
     upstream: {
       description:

@@ -1,6 +1,6 @@
 manifestVersion: 1
 name: "@taylor/swamp-training"
-version: "2026.10.14.1"
+version: "2026.10.14.2"
 license: AGPL-3.0-only
 description: "Retest the swamp-training Slidev deck when swamp ships a new release: every swamp command in the deck is checked against the release's CLI, the deck's @training/file-check lab is rebuilt from the slides and run, and the skills, CLAUDE.md and allowlist that swamp repo init installs are diffed against the last tested release. The release binary runs in a throwaway sandbox, so your installed swamp is left alone."
 repository: "https://github.com/taylorific/swampworks"
