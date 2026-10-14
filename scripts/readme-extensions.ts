@@ -24,6 +24,8 @@ export interface Manifest {
   name: string;
   version: string;
   description?: string;
+  behaviors?: string[];
+  /** The legacy spelling of `behaviors`. */
   models?: string[];
   workflows?: string[];
   vaults?: string[];
@@ -46,7 +48,7 @@ export interface Extension {
 }
 
 const CONTENT_KINDS = [
-  ["models", "model"],
+  ["behaviors", "behavior"],
   ["workflows", "workflow"],
   ["vaults", "vault"],
   ["datastores", "datastore"],
@@ -54,10 +56,14 @@ const CONTENT_KINDS = [
   ["skills", "skill"],
 ] as const;
 
-/** "1 model, 2 workflows" from the manifest's content lists. */
+/** "1 behavior, 2 workflows" from the manifest's content lists. */
 export function contents(m: Manifest): string {
+  const count = (key: (typeof CONTENT_KINDS)[number][0]) =>
+    key === "behaviors"
+      ? (m.behaviors?.length ?? 0) + (m.models?.length ?? 0)
+      : m[key]?.length ?? 0;
   return CONTENT_KINDS
-    .map(([key, noun]) => [m[key]?.length ?? 0, noun] as const)
+    .map(([key, noun]) => [count(key), noun] as const)
     .filter(([n]) => n > 0)
     .map(([n, noun]) => `${n} ${noun}${n === 1 ? "" : "s"}`)
     .join(", ");
