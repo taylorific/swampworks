@@ -1,6 +1,7 @@
 manifestVersion: 1
 name: "@taylor/roam-graph"
-version: "2026.10.11.1"
+version: "2026.10.14.1"
+license: AGPL-3.0-only
 description: "Periodic reviews for a Roam Research graph: weekly summaries of the Activities block on your daily notes, monthly rollups of the weeklies, quarterly rollups of the monthlies, and a yearly rollup of the quarterlies. Reads and writes the graph through Roam's backend API, writes each summary with Claude, and publishes it back to the graph as a heading block on the daily note of the Monday after the period ends. Rollups find their sources by searching the graph, so summaries you write or edit by hand are rolled up too."
 repository: "https://github.com/taylorific/swampworks"
 models:

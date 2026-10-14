@@ -1,6 +1,7 @@
 manifestVersion: 1
 name: "@taylor/github"
-version: "2026.10.11.1"
+version: "2026.10.14.1"
+license: AGPL-3.0-only
 description: "Make sure a GitHub repository exists: create it if it's missing (for your account or an organization, public or private), otherwise report it without changing its settings. Uses the GitHub CLI's existing login, so no token goes in a vault."
 repository: "https://github.com/taylorific/swampworks"
 models:

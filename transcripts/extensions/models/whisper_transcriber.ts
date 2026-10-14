@@ -341,8 +341,15 @@ type TranscribeContext = BuildContext & {
 /** Model definition for containerized Whisper meeting transcription. */
 export const model = {
   type: "@taylor/whisper-transcriber",
-  version: "2026.10.14.1",
+  version: "2026.10.14.2",
   globalArguments: GlobalArgsSchema,
+  upgrades: [
+    {
+      toVersion: "2026.10.14.2",
+      description: "Declares the license in the manifest; no settings changed",
+      upgradeAttributes: (old: Record<string, unknown>) => old,
+    },
+  ],
   resources: {
     image: {
       description: "The built whisper container image",

@@ -916,7 +916,7 @@ function withArgs(
 /** The `@taylor/nexus/instance` swamp model type. */
 export const model = {
   type: "@taylor/nexus/instance",
-  version: "2026.10.11.3",
+  version: "2026.10.14.1",
   globalArguments: GlobalArgsSchema,
   upgrades: [
     {
@@ -934,6 +934,11 @@ export const model = {
       toVersion: "2026.10.11.3",
       description:
         "Add ports and properties; both default to empty, which keeps the old behaviour",
+      upgradeAttributes: (old: Record<string, unknown>) => old,
+    },
+    {
+      toVersion: "2026.10.14.1",
+      description: "Declares the license in the manifest; no settings changed",
       upgradeAttributes: (old: Record<string, unknown>) => old,
     },
   ],

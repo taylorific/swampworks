@@ -1,6 +1,7 @@
 manifestVersion: 1
 name: "@taylor/slidev"
-version: "2026.10.11.3"
+version: "2026.10.14.1"
+license: AGPL-3.0-only
 description: "Work on Slidev decks entirely inside a container (boxcutter/slidev by default) with Docker or Apple's container CLI, so the host needs no Node. A slide fit check opens every slide with all clicks revealed and flags content that runs off the bottom or right edge, bumps against the bottom, or is hidden inside a box that scrolls or clips (a code block with maxHeight, a wide table), with each slide's source file and line and a screenshot. Also creates new decks, and with the @taylor/slidev-new-deck workflow checks it builds and turns it into a GitHub repository with page numbers, a README, a licence and a Pages site deployed by GitHub Actions; serves the deck in the background, exports it to PDF, and lists and upgrades Slidev, vue and playwright-chromium while leaving pinned versions alone. Bundles a slide-fit skill for agent-driven fit passes."
 repository: "https://github.com/taylorific/swampworks"
 models:

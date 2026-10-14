@@ -1,6 +1,7 @@
 manifestVersion: 1
 name: "@taylor/github-pages"
-version: "2026.10.11.1"
+version: "2026.10.14.1"
+license: AGPL-3.0-only
 description: "Make a repository's GitHub Pages site build from GitHub Actions: enable Pages if it's off, switch a branch-built site over, otherwise leave it alone. Uses the GitHub CLI's existing login, so no token goes in a vault."
 repository: "https://github.com/taylorific/swampworks"
 models:

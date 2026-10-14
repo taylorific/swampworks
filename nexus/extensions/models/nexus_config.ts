@@ -1066,8 +1066,15 @@ const describeChange = (c: Change) =>
 /** The `@taylor/nexus/config` swamp model type. */
 export const model = {
   type: "@taylor/nexus/config",
-  version: "2026.10.11.3",
+  version: "2026.10.14.1",
   globalArguments: GlobalArgsSchema,
+  upgrades: [
+    {
+      toVersion: "2026.10.14.1",
+      description: "Declares the license in the manifest; no settings changed",
+      upgradeAttributes: (old: Record<string, unknown>) => old,
+    },
+  ],
   resources: {
     config: {
       description: "What apply changed, or what sync found out of date",

@@ -571,8 +571,15 @@ export async function checkPortAvailable(
 /** The `@taylor/netbox/instance` swamp model type. */
 export const model = {
   type: "@taylor/netbox/instance",
-  version: "2026.10.11.1",
+  version: "2026.10.14.1",
   globalArguments: GlobalArgsSchema,
+  upgrades: [
+    {
+      toVersion: "2026.10.14.1",
+      description: "Declares the license in the manifest; no settings changed",
+      upgradeAttributes: (old: Record<string, unknown>) => old,
+    },
+  ],
   resources: {
     instance: {
       description:
