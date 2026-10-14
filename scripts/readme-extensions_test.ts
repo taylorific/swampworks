@@ -32,18 +32,22 @@ Deno.test("summary keeps the first sentence on one line and escapes pipes", () =
 Deno.test("contents counts each kind with plurals", () => {
   assertEquals(
     contents({ name: "x", version: "1", models: ["a.ts"] }),
-    "1 model",
+    "1 behavior",
   );
   assertEquals(
     contents({ name: "x", version: "1", models: ["a", "b"], workflows: ["w"] }),
-    "2 models, 1 workflow",
+    "2 behaviors, 1 workflow",
+  );
+  assertEquals(
+    contents({ name: "x", version: "1", behaviors: ["a"], models: ["b"] }),
+    "2 behaviors",
   );
 });
 
 Deno.test("renderTable shows registry status", () => {
   assertEquals(
     renderTable([ext(null)]).split("\n")[2],
-    "| [@taylor/webshot](webshot/) | Full-page screenshots (PNG \\| JPEG). | 1 model | `2026.10.11.1` | not published yet |",
+    "| [@taylor/webshot](webshot/) | Full-page screenshots (PNG \\| JPEG). | 1 behavior | `2026.10.11.1` | not published yet |",
   );
   const published = renderTable([
     ext({

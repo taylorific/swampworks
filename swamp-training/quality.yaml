@@ -1,0 +1,4 @@
+version: 1
+accept:
+  - rule: behavior-spelling
+    reason: retests the deck against the latest swamp release, which reads the behavior spelling

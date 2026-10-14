@@ -141,10 +141,11 @@ jobs:
           fi
           echo "Import specifiers OK (zod: ${pins:-not used})"
 
-      # From umag/swamp-workspace: each model's `version:` must equal the
-      # manifest version, so the published package and the model type it
-      # contains never drift apart.
-      - name: Model version matches manifest
+      # From umag/swamp-workspace: each behavior's `version:` must equal the
+      # manifest version, so the published package and the behavior type it
+      # contains never drift apart. Behaviors live in extensions/behaviors/
+      # or, with the legacy spelling, extensions/models/.
+      - name: Behavior version matches manifest
         env:
           EXTENSION: ${{ matrix.extension }}
         run: |
@@ -158,12 +159,12 @@ jobs:
           while IFS= read -r -d '' f; do
             while IFS= read -r v; do
               if [ "$v" != "$manifest" ]; then
-                echo "::error file=${EXTENSION}/${f}::Model version \"$v\" does not match manifest version \"$manifest\""
+                echo "::error file=${EXTENSION}/${f}::Behavior version \"$v\" does not match manifest version \"$manifest\""
                 rc=1
               fi
             done < <(grep -oE '^[[:space:]]*version:[[:space:]]*"[0-9][^"]*"' "$f" | grep -oE '"[^"]+"' | tr -d '"')
-          done < <(find extensions/models -maxdepth 1 -name '*.ts' ! -name '*_test.ts' -print0)
-          [ "$rc" -eq 0 ] && echo "Model versions match manifest $manifest"
+          done < <(find extensions/behaviors extensions/models -maxdepth 1 -name '*.ts' ! -name '*_test.ts' -print0 2>/dev/null)
+          [ "$rc" -eq 0 ] && echo "Behavior versions match manifest $manifest"
           exit "$rc"
 
   webshot-smoke:
