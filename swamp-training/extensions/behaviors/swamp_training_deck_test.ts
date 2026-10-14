@@ -69,7 +69,26 @@ Deno.test("watch lists the commits since the last tested release", async () => {
     { sha: "bbbbbbbb", date: "d2", message: "second" },
     { sha: "aaaaaaaa", date: "d1", message: "first" },
   ]);
+  assertEquals([up.commitsTotal, up.commitsTruncated], [2, false]);
   assertEquals(calls.length, 2);
+});
+
+Deno.test("watch says when GitHub cut the commit list short", async () => {
+  const body = JSON.parse(compare.stdout);
+  const { gh } = fakeGh({
+    "api repos/swamp-club/swamp/releases/latest": latest,
+    "api repos/swamp-club/swamp/compare/v1...v2": ok({
+      ...body,
+      total_commits: 300,
+    }),
+  });
+  const test = context({ report: { version: "v1" } });
+  await behavior.methods.watch.execute(
+    { _gh: gh },
+    test.context as unknown as WatchCtx,
+  );
+  const up = test.getWrittenResources()[0].data;
+  assertEquals([up.commitsTotal, up.commitsTruncated], [300, true]);
 });
 
 Deno.test("watch reports no change when the latest release is tested", async () => {

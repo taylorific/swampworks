@@ -71,6 +71,10 @@ const UpstreamSchema = z.object({
   lastTested: z.string().nullable(),
   changed: z.boolean(),
   commits: z.array(CommitSchema),
+  commitsTotal: z.number(),
+  commitsTruncated: z.boolean().describe(
+    "True when GitHub listed only the oldest 250 of commitsTotal commits",
+  ),
   checkedAt: z.string(),
 });
 
@@ -87,6 +91,10 @@ const ReportSchema = z.object({
   testedAt: z.string(),
   ok: z.boolean(),
   commits: z.array(CommitSchema),
+  commitsTotal: z.number(),
+  commitsTruncated: z.boolean().describe(
+    "True when GitHub listed only the oldest 250 of commitsTotal commits",
+  ),
   commands: z.object({
     total: z.number(),
     ignored: z.number(),
@@ -224,14 +232,22 @@ export async function getRelease(
   };
 }
 
-/** Commits after `base` up to `head`, newest first (GitHub returns at most 250). */
+/** Commits after one release up to another, and whether GitHub cut the list short. */
+export interface CommitList {
+  commits: Commit[];
+  /** How many commits there are in all; GitHub lists at most 250. */
+  total: number;
+  truncated: boolean;
+}
+
+/** Commits after `base` up to `head`, newest first. */
 export async function commitsBetween(
   gh: Gh,
   repo: string,
   base: string,
   head: string,
-): Promise<Commit[]> {
-  if (base === head) return [];
+): Promise<CommitList> {
+  if (base === head) return { commits: [], total: 0, truncated: false };
   const raw = parseOrThrow(
     await gh(["api", `repos/${repo}/compare/${base}...${head}`]),
     `Comparing ${base}...${head}`,
@@ -240,12 +256,21 @@ export async function commitsBetween(
     sha: string;
     commit: { message: string; committer?: { date?: string } };
   }[];
-  return commits.map((c) => ({
-    sha: c.sha.slice(0, 8),
-    date: c.commit.committer?.date ?? "",
-    message: c.commit.message.split("\n")[0],
-  })).reverse();
+  const total = typeof raw.total_commits === "number"
+    ? raw.total_commits
+    : commits.length;
+  return {
+    commits: commits.map((c) => ({
+      sha: c.sha.slice(0, 8),
+      date: c.commit.committer?.date ?? "",
+      message: c.commit.message.split("\n")[0],
+    })).reverse(),
+    total,
+    truncated: total > commits.length,
+  };
 }
+
+const NO_COMMITS: CommitList = { commits: [], total: 0, truncated: false };
 
 /** The release asset for this machine. */
 export function assetName(os: string, arch: string): string {
@@ -489,13 +514,16 @@ export const behavior = {
       ): Promise<{ dataHandles: { name: string }[] }> => {
         const g = context.globalArgs;
         const gh = args._gh ?? ghRunner(g.ghPath);
+        context.logger.info("Checking {repo} for a new release", {
+          repo: g.upstream,
+        });
         const latest = await getRelease(gh, g.upstream);
         const last = await context.readResource("report");
         const lastTested = last ? String(last.version) : null;
         const changed = latest.tag !== lastTested;
-        const commits = lastTested && changed
+        const since = lastTested && changed
           ? await commitsBetween(gh, g.upstream, lastTested, latest.tag)
-          : [];
+          : NO_COMMITS;
         if (changed) {
           context.logger.info(
             "{latest} is out; the deck was last tested against {last}",
@@ -513,7 +541,9 @@ export const behavior = {
           url: latest.url,
           lastTested,
           changed,
-          commits,
+          commits: since.commits,
+          commitsTotal: since.total,
+          commitsTruncated: since.truncated,
           checkedAt: new Date().toISOString(),
         });
         return { dataHandles: [handle] };
@@ -603,9 +633,9 @@ export const behavior = {
             : null;
           const skills = compareSnapshots(prevSnap, snap);
 
-          const commits = previousVersion
+          const since = previousVersion
             ? await commitsBetween(gh, g.upstream, previousVersion, release.tag)
-            : [];
+            : NO_COMMITS;
           const labOk = !labError && steps.every((s) => s.ok);
           const report: Report = {
             version: release.tag,
@@ -613,7 +643,9 @@ export const behavior = {
             platform: asset.replace(/^swamp-/, ""),
             testedAt: new Date().toISOString(),
             ok: commands.errors.length === 0 && labOk,
-            commits,
+            commits: since.commits,
+            commitsTotal: since.total,
+            commitsTruncated: since.truncated,
             commands,
             lab: { ok: labOk, error: labError, steps },
             skills,
