@@ -379,6 +379,7 @@ Deno.test("repositoryPayload: hosted defaults to strict validation and ALLOW", (
         strictContentTypeValidation: true,
         writePolicy: "ALLOW",
       },
+      cleanup: null,
     },
   );
 });
@@ -700,6 +701,42 @@ Deno.test("sync reports drift made in Nexus, field names only, and never writes"
     true,
     "superseekret",
   ]);
+});
+
+Deno.test("removing cleanup, routing rule or remote auth from a declaration clears it", async () => {
+  const proxy = {
+    name: "npm-proxy",
+    format: "npm",
+    type: "proxy",
+    remoteUrl: "https://registry.npmjs.org",
+  };
+  const nexus = new FakeNexus();
+  await runMethod("apply", nexus, {
+    repositories: [{
+      ...proxy,
+      cleanupPolicies: ["weekly"],
+      routingRule: "only-scoped",
+      authentication: { username: "u", password: "remote-secret" },
+    }],
+  });
+  const out = await runMethod("sync", nexus, { repositories: [proxy] });
+  assertEquals(out.changes, [{
+    kind: "repository",
+    name: "npm-proxy",
+    action: "update",
+    fields: ["cleanup", "httpClient.authentication", "routingRule"],
+  }]);
+  const applied = await runMethod("apply", nexus, { repositories: [proxy] });
+  assertEquals(applied.inSync, true);
+  const stored = nexus.repos.get("npm-proxy")!;
+  assertEquals(
+    [
+      stored.cleanup,
+      (stored.httpClient as Json).authentication,
+      stored.routingRule,
+    ],
+    [null, null, null],
+  );
 });
 
 Deno.test("without prune, undeclared items are listed and kept", async () => {
