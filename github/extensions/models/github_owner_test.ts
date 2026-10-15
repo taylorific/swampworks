@@ -60,7 +60,8 @@ function fakeGh(pages: Node[][]) {
   return { gh, calls };
 }
 
-const daysAgo = (d: number) => new Date(Date.now() - d * 86400000).toISOString();
+const daysAgo = (d: number) =>
+  new Date(Date.now() - d * 86400000).toISOString();
 
 async function list(pages: Node[][], args: Record<string, unknown> = {}) {
   const { gh, calls } = fakeGh(pages);
