@@ -135,8 +135,15 @@ export async function listRepos(gh: Gh, owner: string): Promise<RepoEntry[]> {
 /** The `@taylor/github/owner` swamp model type. */
 export const model = {
   type: "@taylor/github/owner",
-  version: "2026.10.15.1",
+  version: "2026.10.15.2",
   globalArguments: GlobalArgsSchema,
+  upgrades: [
+    {
+      toVersion: "2026.10.15.2",
+      description: "Version aligned with the manifest; no settings changed",
+      upgradeAttributes: (old: Record<string, unknown>) => old,
+    },
+  ],
   resources: {
     repos: {
       description:
