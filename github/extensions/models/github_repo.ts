@@ -1,4 +1,13 @@
 import { z } from "npm:zod@4";
+import { type Gh, ghRunner, isNotFound, parseOrThrow } from "./_lib/gh.ts";
+
+export {
+  type Gh,
+  type GhResult,
+  ghRunner,
+  isNotFound,
+  parseOrThrow,
+} from "./_lib/gh.ts";
 
 // A GitHub repository, managed through the GitHub CLI (`gh api`), so it uses
 // whatever account `gh auth login` set up and needs no token in a vault.
@@ -54,65 +63,6 @@ interface Context {
   ) => Promise<{ name: string }>;
 }
 
-/** Result of one `gh` call. */
-export interface GhResult {
-  code: number;
-  stdout: string;
-  stderr: string;
-}
-
-/** Runs `gh` with the given arguments. Injectable for tests. */
-export type Gh = (args: string[]) => Promise<GhResult>;
-
-/** Runs the GitHub CLI and captures its output. */
-export function ghRunner(bin: string): Gh {
-  return async (args) => {
-    let out: Deno.CommandOutput;
-    try {
-      // swamp-quality-ignore deno-command: runs gh api from the GitHub CLI; argument lists are built in this file, see README What it runs
-      out = await new Deno.Command(bin, {
-        args,
-        stdin: "null",
-        stdout: "piped",
-        stderr: "piped",
-        signal: AbortSignal.timeout(60000),
-      }).output();
-    } catch (err) {
-      throw new Error(
-        `Cannot run ${bin}: ${
-          (err as Error).message
-        }. Install the GitHub CLI and run \`gh auth login\`.`,
-      );
-    }
-    const dec = new TextDecoder();
-    return {
-      code: out.code,
-      stdout: dec.decode(out.stdout).trim(),
-      stderr: dec.decode(out.stderr).trim(),
-    };
-  };
-}
-
-/** True when a failed `gh api` call was a 404. */
-export function isNotFound(r: GhResult): boolean {
-  return r.code !== 0 && /\(HTTP 404\)/.test(r.stderr);
-}
-
-/** Parses `gh api` output, or throws with the API's message. */
-export function parseOrThrow(
-  r: GhResult,
-  what: string,
-): Record<string, unknown> {
-  if (r.code !== 0) {
-    let message = r.stderr.replace(/^gh: /, "");
-    try {
-      message = String(JSON.parse(r.stdout).message ?? message);
-    } catch { /* not JSON */ }
-    throw new Error(`${what} failed: ${message}`);
-  }
-  return JSON.parse(r.stdout);
-}
-
 function toRepo(
   raw: Record<string, unknown>,
   action: "created" | "exists",
@@ -134,12 +84,17 @@ function toRepo(
 /** The `@taylor/github/repo` swamp model type. */
 export const model = {
   type: "@taylor/github/repo",
-  version: "2026.10.14.1",
+  version: "2026.10.15.2",
   globalArguments: GlobalArgsSchema,
   upgrades: [
     {
       toVersion: "2026.10.14.1",
       description: "Declares the license in the manifest; no settings changed",
+      upgradeAttributes: (old: Record<string, unknown>) => old,
+    },
+    {
+      toVersion: "2026.10.15.2",
+      description: "Moves the gh helpers to _lib/gh.ts; no settings changed",
       upgradeAttributes: (old: Record<string, unknown>) => old,
     },
   ],
