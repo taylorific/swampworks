@@ -893,3 +893,21 @@ Deno.test("scan checks swamp's own Deno, Java and Electron apps on the host", as
     await Deno.remove(home, { recursive: true });
   }
 });
+
+Deno.test("the upgrade gives 2026.10.21.1 instances an empty keystores list", () => {
+  const [up] = model.upgrades;
+  assertEquals(up.toVersion, model.version);
+  const old = { host: false, images: ["debian:bookworm"] };
+  const upgraded = up.upgradeAttributes(old);
+  assertEquals(upgraded, {
+    keystores: [],
+    host: false,
+    images: ["debian:bookworm"],
+  });
+  assertEquals(model.globalArguments.parse(upgraded).keystores, []);
+  // An instance that already has keystores keeps them.
+  assertEquals(
+    up.upgradeAttributes({ keystores: ["/k.jks"] }).keystores,
+    ["/k.jks"],
+  );
+});

@@ -1460,8 +1460,21 @@ export async function checkRuntime(g: GlobalArgs, run: Run) {
 
 export const model = {
   type: "@taylor/emudhra/exposure",
-  version: "2026.10.21.2",
+  version: "2026.10.21.3",
   globalArguments: GlobalArgsSchema,
+  upgrades: [
+    {
+      toVersion: "2026.10.21.3",
+      description:
+        "2026.10.21.2 added the keystores argument; instances from 2026.10.21.1 get it empty, nothing else changes",
+      upgradeAttributes: (
+        old: Record<string, unknown>,
+      ): Record<string, unknown> => ({
+        keystores: [],
+        ...old,
+      }),
+    },
+  ],
   resources: {
     target: {
       description:
