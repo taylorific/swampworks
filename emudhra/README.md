@@ -1,19 +1,71 @@
 # emudhra
 
-A [swamp](https://swamp.club/) extension that checks Linux, macOS and Windows
-machines, container images, and running containers for exposure to the
-[compromised eMudhra intermediates](https://emudhra.we-have-a-problem.com/).
+**Find where the leaked eMudhra certificate authority keys can still be used
+against you.** This [swamp](https://swamp.club/) extension checks Linux, macOS
+and Windows machines, container images and running containers for trust in
+eight eMudhra intermediate certificate authorities (CAs) whose private keys
+are public. The keys were
+[disclosed on 20 October 2026](https://emudhra.we-have-a-problem.com/).
 
-The private keys of eight eMudhra intermediate CAs (six for TLS, two for code
-signing) can be recovered from their certificates. Each intermediate was issued
-twice: once by an emSign root and once as a Sectigo cross-sign under AAA
-Certificate Services. Browsers and OS vendors blocked them between 17 and 20
-October 2026. Many non-browser clients don't check revocation and need a patched
-CA bundle or a manual distrust.
+## What happened
 
-`scan` changes nothing. For each target it records whether the target still
-trusts the intermediates for TLS and for code signing, why, and what to do about
-it.
+A certificate authority's private key is what makes its certificates
+trustworthy: anything signed with it is accepted by every client that trusts
+the CA. The keys of eight eMudhra intermediate CAs were generated incorrectly,
+so **anyone can recover them from the CA certificates themselves**. No breach
+or insider is needed. Six of the intermediates issue TLS certificates (DV, OV
+and EV); two issue code-signing certificates.
+
+The intermediates chain to roots in the Mozilla, Microsoft, Apple and Chrome
+root programs: each was issued once by an emSign root and once as a Sectigo
+cross-sign under AAA Certificate Services. So until a client stops trusting
+them, it accepts anything signed with these keys.
+
+## Why it's bad
+
+Whoever recovers a key becomes a trusted CA:
+
+- **Impersonate any website or service.** They can issue a valid certificate
+  for any domain (your bank, your company's SSO, a package registry, an API
+  your servers call). A client that trusts the intermediate can't tell the
+  attacker's server from the real one, so anyone positioned on the network
+  (public Wi-Fi, a compromised router, a malicious proxy or DNS) can read and
+  change "encrypted" traffic, including passwords, tokens and downloads.
+- **Sign software that passes as legitimate.** The two code-signing
+  intermediates let them sign programs, scripts and updates that verify as
+  properly signed wherever those intermediates are trusted.
+- **It isn't one site's key, it's a CA's.** A leaked server key exposes one
+  domain. A leaked CA key exposes every domain at once, until the CA itself is
+  distrusted.
+
+The intermediates were created in April 2025 and never appeared in Certificate
+Transparency logs. CT-enforcing browsers (Chrome, Edge, Firefox, Safari) would
+have rejected a certificate from them, so browsers couldn't have been attacked.
+Clients that don't enforce CT could have been, and nobody knows whether anyone
+did.
+
+## Why you still need to check
+
+The intermediates were revoked, and Firefox, Chrome, Apple and Microsoft
+blocked them between 17 and 20 October 2026. That protects browsers and
+up-to-date OS trust stores. It doesn't protect most other software:
+
+- Most non-browser clients (curl, wget, Python, Java, Go, Node.js, Ruby, Deno,
+  package managers, Electron apps) **don't check revocation and don't enforce
+  CT**. They trust whatever is in their own CA bundle, which still includes
+  the roots these intermediates chain to.
+- **Container images keep the CA bundle they were built with.** Every image
+  built before the fixes trusts these roots until it's rebuilt, however
+  up to date the host is.
+- Some fixes aren't released, and some releases will never get one (end-of-life
+  distributions), so the roots have to be distrusted by hand.
+
+`scan` finds those places. For each target it records whether it still trusts
+the intermediates for TLS and for code signing (`exposed`, `protected` or
+`unknown`), which file or verifier says so, and what to do about it: upgrade
+the CA package, rebuild the image, update the toolchain, or distrust the roots
+AAA Certificate Services and emSign ECC Root CA - G3 as the disclosure page
+describes. `scan` reads only; it changes nothing.
 
 ## Behavior
 
