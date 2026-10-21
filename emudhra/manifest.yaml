@@ -1,8 +1,8 @@
 manifestVersion: 1
 name: "@taylor/emudhra"
-version: "2026.10.21.1"
+version: "2026.10.21.2"
 license: AGPL-3.0-only
-description: "Check Linux, macOS and Windows machines, container images and running containers for trust in the eight eMudhra intermediates whose private keys were disclosed in October 2026 (https://emudhra.we-have-a-problem.com/). Matches PEM CA bundles by public key, asks the macOS and Windows verifiers about each intermediate, and compares Node.js and Go with the patched releases. Records exposed, protected or unknown per target for TLS and code signing, with what to do about it; changes nothing."
+description: "Check Linux, macOS and Windows machines, container images and running containers for trust in the eight eMudhra intermediates whose private keys were disclosed in October 2026 (https://emudhra.we-have-a-problem.com/). Matches PEM CA bundles and Java keystores by public key (honouring the JDK's blocked.certs), asks the macOS and Windows verifiers about each intermediate, and compares Node.js, Go, Electron apps and the Deno swamp runs on with the patched releases. Records exposed, protected or unknown per target for TLS and code signing, with what to do about it; changes nothing."
 repository: "https://github.com/taylorific/swampworks"
 models:
   - emudhra_exposure.ts
@@ -17,3 +17,4 @@ labels:
   - pki
   - vulnerability
   - containers
+  - java

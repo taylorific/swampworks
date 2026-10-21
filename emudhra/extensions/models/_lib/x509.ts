@@ -4,7 +4,7 @@
 // signed it.
 
 /** The bounds of one DER element. */
-interface Tlv {
+export interface Tlv {
   tag: number;
   /** Offset of the tag byte. */
   start: number;
@@ -14,7 +14,8 @@ interface Tlv {
   end: number;
 }
 
-function readTlv(der: Uint8Array, at: number): Tlv {
+/** Reads the DER element that starts at `at`. */
+export function readTlv(der: Uint8Array, at: number): Tlv {
   if (at + 2 > der.length) throw new Error("Truncated DER");
   const tag = der[at];
   let len = der[at + 1];
@@ -101,9 +102,16 @@ export interface CertHashes {
 }
 
 /** The certificate and key hashes of every certificate in a PEM bundle. */
-export async function hashBundle(text: string): Promise<CertHashes[]> {
+export function hashBundle(text: string): Promise<CertHashes[]> {
+  return hashCertificates(splitPem(text));
+}
+
+/** The certificate and key hashes of DER certificates. */
+export async function hashCertificates(
+  ders: Uint8Array[],
+): Promise<CertHashes[]> {
   const out: CertHashes[] = [];
-  for (const der of splitPem(text)) {
+  for (const der of ders) {
     try {
       out.push({
         sha256: await sha256Hex(certificateBytes(der)),

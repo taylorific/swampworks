@@ -8,16 +8,24 @@ import { createModelTestContext } from "jsr:@swamp-club/swamp-testing@0.20261008
 import {
   assess,
   checkBundle,
+  checkKeystore,
   checkRuntime,
   distroFix,
+  electronApps,
+  electronVersion,
   hostBundles,
+  hostKeystores,
+  inspectJavaHome,
   isPatched,
   macVerdict,
   model,
   parseOsRelease,
   type Platform,
+  readHostKeystores,
   type RunResult,
   slug,
+  swampDeno,
+  toolchain,
   windowsVerdict,
 } from "./emudhra_exposure.ts";
 import {
@@ -25,6 +33,7 @@ import {
   CROSS_SIGNED_TLS_ROOT,
   INTERMEDIATES,
 } from "./_lib/indicators.ts";
+import { parseBlockedCerts, readKeystore } from "./_lib/keystore.ts";
 import {
   certificateBytes,
   fromBase64,
@@ -292,8 +301,14 @@ Deno.test("checkRuntime only matters when there are containers", async () => {
   assertStringIncludes(r.errors![0], "container system start");
 });
 
-/** A fake docker: `cp` writes the files in `fs`, other calls are recorded. */
-function fakeDocker(fs: Record<string, string>) {
+/**
+ * A fake docker: `cp` writes the files in `fs`, `inspect` reports `env` for
+ * "web" and for the containers it creates, other calls are recorded.
+ */
+function fakeDocker(
+  fs: Record<string, string | Uint8Array>,
+  env: string[] = [],
+) {
   const calls: string[] = [];
   const run = async (cmd: string, args: string[]) => {
     calls.push([cmd, ...args].join(" "));
@@ -301,18 +316,22 @@ function fakeDocker(fs: Record<string, string>) {
     if (args[0] === "create") return ok("abc123");
     if (args[0] === "rm") return ok();
     if (args[0] === "inspect") {
-      return args[1] === "web" ? ok("[{}]") : {
-        code: 1,
-        stdout: "",
-        stderr: `Error: No such object: ${args[1]}`,
-      };
+      return args[1] === "web" || args[1].startsWith("emudhra-scan-")
+        ? ok(JSON.stringify([{ Config: { Env: env } }]))
+        : {
+          code: 1,
+          stdout: "",
+          stderr: `Error: No such object: ${args[1]}`,
+        };
     }
     if (args[0] === "cp") {
       const path = args[2].split(":")[1];
       if (!(path in fs)) {
         return { code: 1, stdout: "", stderr: "Could not find the file" };
       }
-      await Deno.writeTextFile(args[3], fs[path]);
+      const data = fs[path];
+      if (typeof data === "string") await Deno.writeTextFile(args[3], data);
+      else await Deno.writeFile(args[3], data);
       return ok();
     }
     return missing;
@@ -459,4 +478,418 @@ Deno.test("assess keeps notes about bundles it couldn't read", () => {
     ["Could not read /x.pem: Permission denied"],
   );
   assertEquals(t.findings[0], "Could not read /x.pem: Permission denied");
+});
+
+const bytes = (...parts: (Uint8Array | number[])[]) =>
+  Uint8Array.from(parts.flatMap((p) => Array.from(p)));
+const u16 = (n: number) => [n >> 8, n & 0xff];
+const u32 = (
+  n: number,
+) => [n >>> 24, (n >> 16) & 0xff, (n >> 8) & 0xff, n & 0xff];
+const utf = (s: string) => bytes(u16(s.length), new TextEncoder().encode(s));
+const hexBytes = (h: string) => h.match(/../g)!.map((x) => parseInt(x, 16));
+
+/** A DER element with a definite length. */
+function der(tag: number, ...parts: Uint8Array[]): Uint8Array {
+  const body = bytes(...parts);
+  const n = body.length;
+  const len = n < 0x80
+    ? [n]
+    : n < 0x100
+    ? [0x81, n]
+    : n < 0x10000
+    ? [0x82, n >> 8, n & 0xff]
+    : [0x83, n >> 16, (n >> 8) & 0xff, n & 0xff];
+  return bytes([tag], len, body);
+}
+const seq = (...p: Uint8Array[]) => der(0x30, ...p);
+const oid = (h: string) => der(0x06, Uint8Array.from(hexBytes(h)));
+const explicit0 = (...p: Uint8Array[]) => der(0xa0, ...p);
+const octet = (...p: Uint8Array[]) => der(0x04, ...p);
+const DATA = "2a864886f70d010701";
+
+/** A password-less PKCS#12 trust store, as keytool writes cacerts. */
+function pkcs12(certs: Uint8Array[], encryptedBag = false): Uint8Array {
+  const bags = seq(
+    ...certs.map((c) =>
+      seq(
+        oid("2a864886f70d010c0a0103"),
+        explicit0(seq(oid("2a864886f70d01091601"), explicit0(octet(c)))),
+      )
+    ),
+  );
+  const infos = [seq(oid(DATA), explicit0(octet(bags)))];
+  if (encryptedBag) {
+    infos.push(seq(oid("2a864886f70d010706"), explicit0(seq())));
+  }
+  return seq(
+    der(0x02, Uint8Array.from([3])),
+    seq(oid(DATA), explicit0(octet(seq(...infos)))),
+  );
+}
+
+/** A JKS keystore with trusted certificates and one key entry's chain. */
+function jks(trusted: Uint8Array[], chain: Uint8Array[] = [], version = 2) {
+  const cert = (c: Uint8Array) =>
+    bytes(version === 2 ? utf("X.509") : [], u32(c.length), c);
+  const entries = trusted.map((c, n) =>
+    bytes(u32(2), utf(`ca${n}`), new Array(8).fill(0), cert(c))
+  );
+  if (chain.length) {
+    entries.push(bytes(
+      u32(1),
+      utf("server"),
+      new Array(8).fill(0),
+      u32(3),
+      [1, 2, 3],
+      u32(chain.length),
+      ...chain.map(cert),
+    ));
+  }
+  return bytes(
+    u32(0xfeedfeed),
+    u32(version),
+    u32(entries.length),
+    ...entries,
+    new Array(20).fill(0),
+  );
+}
+
+const derOf = (pem: string) =>
+  fromBase64(pem.replace(/-----[A-Z ]+-----/g, ""));
+const AAA_DER = fromBase64(AAA.der);
+const ECC_DER = fromBase64(ECC.der);
+const blockedCerts = (...shas: string[]) =>
+  ["Algorithm=SHA-256", ...shas].join("\n") + "\n";
+
+Deno.test("readKeystore reads JKS trusted entries and key chains", () => {
+  for (const version of [1, 2]) {
+    const ks = readKeystore(
+      jks([derOf(UNRELATED), AAA_DER], [ECC_DER], version),
+    );
+    assertEquals(ks.format, "jks");
+    assertEquals(ks.certificates.length, 3);
+    assertEquals(ks.certificates[1], AAA_DER);
+  }
+});
+
+Deno.test("readKeystore reads password-less PKCS#12 and notes encrypted bags", () => {
+  const ks = readKeystore(pkcs12([AAA_DER, derOf(UNRELATED)]));
+  assertEquals(ks.format, "pkcs12");
+  assertEquals(ks.certificates.length, 2);
+  assertEquals(ks.encrypted, false);
+  assert(readKeystore(pkcs12([AAA_DER], true)).encrypted);
+});
+
+Deno.test("readKeystore rejects what isn't a keystore", () => {
+  let error: Error | undefined;
+  try {
+    readKeystore(new TextEncoder().encode("hello"));
+  } catch (err) {
+    error = err as Error;
+  }
+  assertStringIncludes(error!.message, "Not a JKS or PKCS#12 keystore");
+});
+
+Deno.test("parseBlockedCerts reads SHA-256 block lists only", () => {
+  const sha = INTERMEDIATES[0].sha256;
+  assertEquals(
+    parseBlockedCerts(blockedCerts(sha.toLowerCase(), "nonsense")),
+    new Set([sha]),
+  );
+  assertEquals(parseBlockedCerts("Algorithm=SHA-1\nABCD\n"), null);
+});
+
+Deno.test("checkKeystore exposes both usages through AAA until blocked.certs refuses the intermediates", async () => {
+  const store = pkcs12([derOf(UNRELATED), AAA_DER]);
+  const open = await checkKeystore("/jdk/cacerts", "java", store, null);
+  assertEquals(open.bundle.anchors, ["AAA Certificate Services"]);
+  assertEquals(open.bundle.exposes, ["tls", "codeSigning"]);
+  assertEquals(open.bundle.blocked, []);
+
+  const aaa = INTERMEDIATES.filter((i) =>
+    i.issuedBy === "AAA Certificate Services"
+  );
+  const tlsOnly = aaa.filter((i) => i.usage.includes("tls"));
+  const some = await checkKeystore(
+    "/jdk/cacerts",
+    "java",
+    store,
+    blockedCerts(...tlsOnly.map((i) => i.sha256)),
+  );
+  assertEquals(some.bundle.exposes, ["codeSigning"]);
+  assertEquals(some.bundle.blocked!.length, 6);
+  assertStringIncludes(
+    some.bundle.blocked![0],
+    "(issued by AAA Certificate Services)",
+  );
+
+  const all = await checkKeystore(
+    "/jdk/cacerts",
+    "java",
+    store,
+    blockedCerts(...aaa.map((i) => i.sha256)),
+  );
+  assertEquals(all.bundle.exposes, []);
+});
+
+Deno.test("checkKeystore follows emSign ECC Root CA - G3 to the TLS intermediates", async () => {
+  const store = jks([ECC_DER]);
+  const open = await checkKeystore("/k.jks", "java", store, null);
+  assertEquals(open.bundle.exposes, ["tls"]);
+  const viaTls = INTERMEDIATES.filter((i) =>
+    i.issuedBy === "emSign Root TLS CA - G3"
+  );
+  const blocked = await checkKeystore(
+    "/k.jks",
+    "java",
+    store,
+    blockedCerts(...viaTls.map((i) => i.sha256)),
+  );
+  assertEquals(blocked.bundle.exposes, []);
+});
+
+Deno.test("checkKeystore notes what it couldn't read", async () => {
+  const r = await checkKeystore(
+    "/k.p12",
+    "extra",
+    pkcs12([derOf(UNRELATED)], true),
+    "Algorithm=MD5\n",
+  );
+  assertEquals(r.bundle.exposes, []);
+  assertStringIncludes(r.notes[0], "password-protected");
+  assertStringIncludes(r.notes[1], "not SHA-256");
+});
+
+Deno.test("toolchain knows the patched Electron lines and that Deno has no release yet", () => {
+  assertEquals(toolchain("electron", "43.6.0").status, "outdated");
+  assertEquals(toolchain("electron", "43.8.1").status, "patched");
+  assertEquals(toolchain("electron", "38.2.0").status, "outdated");
+  assertEquals(toolchain("electron", "45.0.0").status, "patched");
+  const deno = swampDeno({
+    version: "2.9.7",
+    execPath: "/usr/local/bin/swamp",
+  });
+  assertEquals(deno.status, "outdated");
+  assertEquals(deno.path, "/usr/local/bin/swamp");
+  assertStringIncludes(deno.note!, "denoland/deno#37046");
+  assert(!isPatched("9.9.9", [], 2), "no release has the fix");
+});
+
+Deno.test("assess explains outdated apps and swamp's Deno", () => {
+  const t = assess(
+    { target: "host", kind: "host", os: "darwin", distro: null },
+    [],
+    [],
+    [
+      toolchain("electron", "38.2.0", "/Applications/Roam.app"),
+      swampDeno({ version: "2.9.7", execPath: "/usr/local/bin/swamp" }),
+    ],
+  );
+  assertEquals(t.tls, "exposed");
+  assertEquals(
+    t.findings[0],
+    "/Applications/Roam.app (electron 38.2.0) predates the fix (42.11.16, 43.8.1, 44.9.1)",
+  );
+  assertStringIncludes(
+    t.remediation[0],
+    "/Applications/Roam.app: update the app",
+  );
+  assertStringIncludes(
+    t.remediation[1],
+    "DENO_TLS_CA_STORE=system doesn't help",
+  );
+});
+
+Deno.test("electronVersion finds the version across a chunk boundary", async () => {
+  const dir = await Deno.makeTempDir();
+  try {
+    const path = `${dir}/app`;
+    const marker = new TextEncoder().encode("Electron/43.6.0 ");
+    const data = new Uint8Array((4 << 20) + 64);
+    data.set(marker, (4 << 20) - 5);
+    await Deno.writeFile(path, data);
+    assertEquals(await electronVersion(path), "43.6.0");
+    await Deno.writeFile(path, new Uint8Array(100));
+    assertEquals(await electronVersion(path), null);
+  } finally {
+    await Deno.remove(dir, { recursive: true });
+  }
+});
+
+Deno.test("electronApps finds apps with resources/app in the install directory or one below", async () => {
+  const root = await Deno.makeTempDir();
+  const exe = (v: string) =>
+    new TextEncoder().encode(`${"x".repeat(2000)}Electron/${v}`);
+  const put = async (path: string, data: Uint8Array) => {
+    await Deno.mkdir(path.slice(0, path.lastIndexOf("/")), { recursive: true });
+    await Deno.writeFile(path, data);
+  };
+  try {
+    // An installer that keeps resources in a versioned folder, like VS Code.
+    await put(`${root}/Code/Code.exe`, exe("43.6.0"));
+    await Deno.mkdir(`${root}/Code/2242ebbb54/resources/app`, {
+      recursive: true,
+    });
+    // A Squirrel app, next to a small uninstaller.
+    await put(`${root}/slack/app-4.4/slack.exe`, exe("44.9.1"));
+    await put(`${root}/slack/app-4.4/resources/app.asar`, new Uint8Array(1));
+    await put(`${root}/slack/Update.exe`, exe("1.0.0").subarray(0, 100));
+    // Chromium without an app is not Electron.
+    await put(`${root}/Chrome/chrome.exe`, exe("1.2.3"));
+    const apps = await electronApps([root], "windows", 1000);
+    assertEquals(
+      apps.map((a) => [a.path!.slice(root.length + 1), a.version, a.status]),
+      [["Code", "43.6.0", "outdated"], ["slack", "44.9.1", "patched"]],
+    );
+  } finally {
+    await Deno.remove(root, { recursive: true });
+  }
+});
+
+Deno.test("hostKeystores finds Java homes, bundled runtimes and the java on PATH", async () => {
+  const root = await Deno.makeTempDir();
+  const home = await Deno.makeTempDir();
+  const sep = Deno.build.os === "windows" ? "\\" : "/";
+  const security = (h: string) => `${h}/lib/security`;
+  try {
+    for (
+      const h of [
+        `${root}/Eclipse Adoptium/jdk-21`,
+        `${root}/JetBrains/IDEA/jbr`,
+        home,
+      ]
+    ) {
+      await Deno.mkdir(security(h), { recursive: true });
+      await Deno.writeFile(`${security(h)}/cacerts`, pkcs12([AAA_DER]));
+    }
+    await Deno.writeTextFile(
+      `${security(`${root}/JetBrains/IDEA/jbr`)}/blocked.certs`,
+      blockedCerts(...INTERMEDIATES.map((i) => i.sha256)),
+    );
+    const run = (cmd: string) =>
+      Promise.resolve(
+        cmd === "java"
+          ? {
+            code: 0,
+            stdout: "",
+            stderr: `Property settings:\n    java.home = ${home}\n`,
+          }
+          : missing,
+      );
+    const p: Platform = { os: "windows", env: () => undefined };
+    const refs = await hostKeystores(run, p, [root]);
+    assertEquals(refs.length, 3);
+    assertEquals(refs[0].path, `${home}${sep}lib${sep}security${sep}cacerts`);
+    const { bundles, notes } = await readHostKeystores([
+      ...refs,
+      { path: `${root}/missing.jks`, source: "extra" },
+    ]);
+    assertEquals(bundles.map((b) => b.exposes.length), [2, 2, 0]);
+    assertStringIncludes(notes[0], "missing.jks");
+  } finally {
+    await Deno.remove(root, { recursive: true });
+    await Deno.remove(home, { recursive: true });
+  }
+});
+
+Deno.test("inspectJavaHome reads the environment from inspect", () => {
+  assertEquals(
+    inspectJavaHome(
+      '[{"Config":{"Env":["PATH=/bin","JAVA_HOME=/opt/java/openjdk"]}}]',
+    ),
+    "/opt/java/openjdk",
+  );
+  assertEquals(inspectJavaHome("[{}]"), null);
+});
+
+Deno.test("scan reads an image's JAVA_HOME keystore and its block list", async () => {
+  const store = pkcs12([AAA_DER]);
+  const docker = fakeDocker(
+    {
+      "/opt/java/openjdk/lib/security/cacerts": store,
+      "/opt/java/openjdk/lib/security/blocked.certs": blockedCerts(
+        ...INTERMEDIATES.filter((i) => i.usage.includes("codeSigning")).map(
+          (i) => i.sha256,
+        ),
+      ),
+      // The distribution's store holds the same bytes; it is read once.
+      "/etc/ssl/certs/java/cacerts": store,
+    },
+    ["JAVA_HOME=/opt/java/openjdk"],
+  );
+  const { out, error } = await scan(
+    { host: false, images: ["eclipse-temurin:21"] },
+    docker.run,
+  );
+  assertEquals(error, undefined);
+  const t = out["image-eclipse-temurin-21"];
+  assertEquals([t.tls, t.codeSigning], ["exposed", "protected"]);
+  const bundles = t.bundles as { path: string; source: string }[];
+  assertEquals(bundles.map((b) => b.path), [
+    "/opt/java/openjdk/lib/security/cacerts",
+  ]);
+  assertStringIncludes(
+    (t.remediation as string[])[0],
+    "update this Java runtime",
+  );
+});
+
+Deno.test("scan checks swamp's own Deno, Java and Electron apps on the host", async () => {
+  const home = await Deno.makeTempDir();
+  try {
+    const jdk =
+      `${home}/Library/Java/JavaVirtualMachines/jdk-21.jdk/Contents/Home`;
+    await Deno.mkdir(`${jdk}/lib/security`, { recursive: true });
+    await Deno.writeFile(`${jdk}/lib/security/cacerts`, jks([ECC_DER]));
+    const fw =
+      `${home}/Applications/Roam.app/Contents/Frameworks/Electron Framework.framework/Resources`;
+    await Deno.mkdir(fw, { recursive: true });
+    await Deno.writeTextFile(
+      `${fw}/Info.plist`,
+      "<dict>\n<key>CFBundleVersion</key>\n<string>38.2.0</string>\n</dict>",
+    );
+    const test = createModelTestContext({
+      globalArgs: model.globalArguments.parse({}),
+      methodName: "scan",
+    });
+    const m = model.methods.scan;
+    await m.execute(
+      {
+        ...m.arguments.parse({}),
+        _run: () => Promise.resolve(missing),
+        _platform: {
+          os: "darwin",
+          env: (n: string) => n === "HOME" ? home : undefined,
+        },
+        _deno: { version: "2.9.7", execPath: "/usr/local/bin/swamp" },
+      },
+      test.context as unknown as Ctx,
+    );
+    const host = test.getWrittenResources().find((r) => r.name === "host")!
+      .data as {
+        toolchains: { tool: string; path?: string; status: string }[];
+        bundles: { path: string; exposes: string[] }[];
+        tls: string;
+      };
+    assertEquals(host.tls, "exposed");
+    assert(
+      host.toolchains.some((t) =>
+        t.tool === "deno" && t.path === "/usr/local/bin/swamp" &&
+        t.status === "outdated"
+      ),
+    );
+    assert(
+      host.toolchains.some((t) =>
+        t.tool === "electron" && t.path!.endsWith("Roam.app")
+      ),
+    );
+    assert(
+      host.bundles.some((b) =>
+        b.path.includes("jdk-21.jdk") && b.exposes.join() === "tls"
+      ),
+    );
+  } finally {
+    await Deno.remove(home, { recursive: true });
+  }
 });
