@@ -180,13 +180,19 @@ and toolchain bundles count for TLS, Fedora's `objsign` bundle for code signing,
 and bundles you name in `bundles` for both. A blocklist (`update-ca-trust`,
 `/etc/ca-certificates.conf`) shows up here once it has rebuilt the bundle.
 
-OpenSSL's `TRUSTED CERTIFICATE` blocks carry trust settings. One rejected for
-any use (`-addreject anyExtendedKeyUsage`) doesn't count. One rejected only for
-named uses still does: `update-ca-trust` writes blocklisted roots into
-`ca-bundle.trust.crt` that way, and OpenSSL trusts them when a caller names no
-purpose
+OpenSSL's `TRUSTED CERTIFICATE` blocks carry trust settings, and they count
+per usage. A certificate rejected for TLS server authentication isn't trusted
+for TLS, one rejected for code signing isn't trusted for code signing, and one
+rejected for any use (`-addreject anyExtendedKeyUsage`) isn't trusted at all.
+`update-ca-trust` writes blocklisted roots into `ca-bundle.trust.crt` rejected
+for TLS, code signing and other named uses, but not for any use. TLS clients
+refuse them: with the page's chains and that bundle, curl, `openssl s_client`
+and Python all fail with "certificate rejected" on AlmaLinux 9. But OpenSSL
+accepts them when a caller names no purpose, as `openssl verify` does
 ([galadran/we-have-a-problem.com#78](https://github.com/galadran/we-have-a-problem.com/pull/78)).
-The Fedora-family remediation includes the extra `-addreject` step.
+The bundle doesn't count as exposed for that. Instead, `rejectedForNamedUses`
+lists the roots, and a finding and the `-addreject` fix say how to close the
+gap.
 
 **Recoverable keys.** Every bundle and keystore is also checked for the flaw
 itself. For each P-256, P-384 or P-521 certificate, the scan compares its
@@ -347,6 +353,12 @@ in `bundles` or `keystores`.
   and fails with `SSL_CERT_FILE` pointed elsewhere). With
   `git -c http.sslBackend=openssl`, Git reads `ca-bundle.crt`, as its
   `CAfile` shows.
+
+- 22 October 2026, 2026.10.22.4: the 30 dokken images (AlmaLinux, Amazon
+  Linux, CentOS Stream, Debian, Fedora, openSUSE, Oracle Linux, Rocky Linux,
+  Ubuntu) and the cinc and ubuntu-autoinstall images. Debian 11 and openSUSE
+  Leap 15 and 15.6 are exposed; the RHEL-family images, which carry the
+  page's blocklist, are protected, with the no-purpose note.
 
 ## What it runs
 

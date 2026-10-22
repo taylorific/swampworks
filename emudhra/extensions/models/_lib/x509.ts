@@ -2,7 +2,7 @@
 // SubjectPublicKeyInfo in a DER certificate, and hash it. Matching on the
 // key rather than the whole certificate catches every copy of a CA, whoever
 // signed it. Also the trust settings OpenSSL appends to a TRUSTED
-// CERTIFICATE, enough to tell when one is rejected for every use.
+// CERTIFICATE, enough to tell what each is rejected for.
 
 /** The bounds of one DER element. */
 export interface Tlv {
@@ -96,49 +96,64 @@ export function splitPem(text: string): Uint8Array[] {
   return out;
 }
 
-/** anyExtendedKeyUsage (2.5.29.37.0), DER-encoded with its tag. */
-const ANY_EKU = [0x06, 0x04, 0x55, 0x1d, 0x25, 0x00];
-
-/**
- * Whether a trusted certificate's settings reject it for any use, as
- * `openssl x509 -trustout -addreject anyExtendedKeyUsage` writes them. They
- * follow the certificate as X509_CERT_AUX, whose [0] holds the rejected
- * purposes. One rejected only for named purposes, as update-ca-trust writes
- * blocklisted roots into ca-bundle.trust.crt, is still trusted by OpenSSL
- * when the caller asks for no purpose.
- */
-export function rejectsAnyUse(der: Uint8Array): boolean {
-  try {
-    return auxRejectsAny(der);
-  } catch {
-    // Damaged trust settings reject nothing.
-    return false;
-  }
+/** What a trusted certificate's settings reject it for. */
+export interface Rejections {
+  /** anyExtendedKeyUsage: every use, including a caller that names none. */
+  any: boolean;
+  /** TLS server authentication, the purpose TLS clients ask for. */
+  serverAuth: boolean;
+  codeSigning: boolean;
 }
 
-function auxRejectsAny(der: Uint8Array): boolean {
-  const cert = readTlv(der, 0);
-  if (cert.end >= der.length) return false;
-  const aux = readTlv(der, cert.end);
-  if (aux.tag !== 0x30) return false;
-  for (let at = aux.body; at < aux.end;) {
-    const e = readTlv(der, at);
-    if (e.tag === 0xa0) {
-      for (let o = e.body; o < e.end;) {
-        const oid = readTlv(der, o);
-        const bytes = der.subarray(oid.start, oid.end);
-        if (
-          bytes.length === ANY_EKU.length &&
-          bytes.every((b, i) => b === ANY_EKU[i])
-        ) {
-          return true;
+export const NO_REJECTIONS: Rejections = {
+  any: false,
+  serverAuth: false,
+  codeSigning: false,
+};
+
+/** The rejected purposes we look for, as hex DER OIDs with tag. */
+const REJECT_OIDS: Record<string, keyof Rejections> = {
+  "0604551d2500": "any", // 2.5.29.37.0
+  "06082b06010505070301": "serverAuth", // 1.3.6.1.5.5.7.3.1
+  "06082b06010505070303": "codeSigning", // 1.3.6.1.5.5.7.3.3
+};
+
+/**
+ * The purposes a trusted certificate's settings reject, as OpenSSL writes
+ * them after the certificate in X509_CERT_AUX, whose [0] lists them.
+ * update-ca-trust writes blocklisted roots into ca-bundle.trust.crt rejected
+ * for TLS, code signing and other named uses but not for any use: TLS
+ * clients, which ask for the TLS server purpose, refuse them, but OpenSSL
+ * accepts them when a caller names no purpose (`openssl verify`).
+ * Damaged trust settings reject nothing.
+ */
+export function rejections(der: Uint8Array): Rejections {
+  const out = { ...NO_REJECTIONS };
+  try {
+    const cert = readTlv(der, 0);
+    if (cert.end >= der.length) return out;
+    const aux = readTlv(der, cert.end);
+    if (aux.tag !== 0x30) return out;
+    for (let at = aux.body; at < aux.end;) {
+      const e = readTlv(der, at);
+      if (e.tag === 0xa0) {
+        for (let o = e.body; o < e.end;) {
+          const oid = readTlv(der, o);
+          const hex = Array.from(
+            der.subarray(oid.start, oid.end),
+            (b) => b.toString(16).padStart(2, "0"),
+          ).join("");
+          const name = REJECT_OIDS[hex];
+          if (name) out[name] = true;
+          o = oid.end;
         }
-        o = oid.end;
       }
+      at = e.end;
     }
-    at = e.end;
+  } catch {
+    return { ...NO_REJECTIONS };
   }
-  return false;
+  return out;
 }
 
 /** One certificate from a bundle, by its hashes. */
@@ -146,8 +161,8 @@ export interface CertHashes {
   sha256: string;
   spkiSha256: string;
   spki: Uint8Array;
-  /** A trusted certificate rejected for any use: the bundle doesn't trust it. */
-  rejected: boolean;
+  /** What its trust settings reject it for; nothing for a plain certificate. */
+  rejects: Rejections;
 }
 
 /** The certificate and key hashes of every certificate in a PEM bundle. */
@@ -167,7 +182,7 @@ export async function hashCertificates(
         sha256: await sha256Hex(certificateBytes(der)),
         spkiSha256: await sha256Hex(spki),
         spki,
-        rejected: rejectsAnyUse(der),
+        rejects: rejections(der),
       });
     } catch {
       // Not a certificate we can read; it can't be one of ours.

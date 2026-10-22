@@ -241,8 +241,11 @@ const SERVER_AUTH = [
   0x01,
 ];
 const ANY_EKU = [0x06, 0x04, 0x55, 0x1d, 0x25, 0x00];
+const eku = (n: number) => [...SERVER_AUTH.slice(0, -1), n];
+const CODE_SIGNING = eku(3);
+const EMAIL = eku(4);
 
-Deno.test("checkBundle honours a rejection for any use, and only that", async () => {
+Deno.test("checkBundle applies trust settings per usage", async () => {
   const trust = "/etc/pki/ca-trust/extracted/openssl/ca-bundle.trust.crt";
   const any = await checkBundle(
     trust,
@@ -250,21 +253,54 @@ Deno.test("checkBundle honours a rejection for any use, and only that", async ()
     trustedPem(ECC_DER, [ANY_EKU]),
   );
   assertEquals([any.certificates, any.anchors, any.exposes], [1, [], []]);
-  const named = await checkBundle(
+  assertEquals(any.rejectedForNamedUses, undefined);
+
+  // As update-ca-trust writes a blocklisted root: rejected for TLS, code
+  // signing and more, but not for any use. curl, openssl s_client and Python
+  // refuse the compromised chains with it; openssl verify with no purpose
+  // accepts them.
+  const blocklisted = await checkBundle(
     trust,
     "system",
-    trustedPem(ECC_DER, [SERVER_AUTH]),
+    trustedPem(ECC_DER, [SERVER_AUTH, eku(2), CODE_SIGNING, EMAIL]) +
+      trustedPem(AAA_DER, [SERVER_AUTH, eku(2), CODE_SIGNING, EMAIL]),
   );
-  assertEquals(named.anchors, ["emSign ECC Root CA - G3"]);
-  assertEquals(named.exposes, ["tls"]);
+  assertEquals([blocklisted.anchors, blocklisted.exposes], [[], []]);
+  assertEquals(blocklisted.rejectedForNamedUses, [
+    "AAA Certificate Services",
+    "emSign ECC Root CA - G3",
+  ]);
   const t = assess(
-    { target: "host", kind: "host", os: "linux", distro: "Fedora" },
-    [named],
+    { target: "x", kind: "image", os: "linux", distro: "AlmaLinux 9" },
+    [blocklisted],
     [],
     [],
-    { ID: "fedora" },
+    { ID: "almalinux" },
   );
+  assertEquals(t.tls, "protected");
+  assertStringIncludes(t.findings[0], "names no purpose");
   assertStringIncludes(t.remediation[0], "-addreject anyExtendedKeyUsage");
+
+  // Rejected for something it isn't used for: still trusted.
+  const email = await checkBundle(
+    trust,
+    "system",
+    trustedPem(ECC_DER, [EMAIL]),
+  );
+  assertEquals([email.anchors, email.exposes], [["emSign ECC Root CA - G3"], [
+    "tls",
+  ]]);
+
+  // A bundle used for both keeps the usage that isn't rejected.
+  const both = await checkBundle(
+    "/b.pem",
+    "extra",
+    trustedPem(AAA_DER, [SERVER_AUTH]),
+  );
+  assertEquals([both.anchors, both.exposes], [["AAA Certificate Services"], [
+    "codeSigning",
+  ]]);
+  assertEquals(both.rejectedForNamedUses, undefined);
 });
 
 Deno.test("isPatched compares within a release line", () => {
