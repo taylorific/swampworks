@@ -1,6 +1,6 @@
 manifestVersion: 1
 name: "@taylor/emudhra"
-version: "2026.10.22.3"
+version: "2026.10.22.4"
 license: AGPL-3.0-only
 description: "Find where the leaked private keys of eight compromised eMudhra certificate authorities can still be used against you. Anyone can recover these keys (disclosed 2026-10-20, https://emudhra.we-have-a-problem.com/) and use them to impersonate any website or sign code that clients still trust. Browsers and OS stores block them, but curl, Python, Java, Go, Node.js, Deno, Electron apps and container images often still trust them. Checks Linux, macOS and Windows hosts, container images and running containers: PEM CA bundles and Java keystores matched by public key (honouring blocked.certs and OpenSSL trust settings), any EC CA whose private key is small enough to recover the same way, the macOS and Windows verifiers, and the versions of tools that carry their own roots (Node.js, Go, Deno, Bun, uv, pixi, rustup, mise, Claude Code, Docker Desktop, Electron apps) against the patched releases. Records exposed, protected or unknown per target for TLS and code signing, with what to do about it; changes nothing."
 repository: "https://github.com/taylorific/swampworks"

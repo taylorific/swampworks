@@ -102,6 +102,13 @@ const BundleSchema = z.object({
    */
   recoverable: z.array(z.string()).optional(),
   /**
+   * OpenSSL trust bundles: roots and intermediates whose trust settings
+   * reject them for everything the bundle verifies, but not for any use, so
+   * OpenSSL still accepts them when a caller names no purpose. Not exposure;
+   * present when there are any.
+   */
+  rejectedForNamedUses: z.array(z.string()).optional(),
+  /**
    * Git for Windows' bundle: the http.sslBackend Git uses. With schannel Git
    * verifies with the Windows store and never reads the bundle, unless
    * http.schannelUseSSLCAInfo points schannel at it (schannel-cainfo).
@@ -405,10 +412,26 @@ function recoverable(certs: CertHashes[]): string[] {
   ).map((c) => c.sha256);
 }
 
+/** Whether trust settings stop a certificate being used for a usage. */
+function rejectedFor(c: CertHashes, u: Usage): boolean {
+  return c.rejects.any ||
+    (u === "tls" ? c.rejects.serverAuth : c.rejects.codeSigning);
+}
+
+/** The indicators whose keys are among these certificates. */
+function indicatorsIn(certs: CertHashes[]): Indicator[] {
+  const keys = new Set(certs.map((c) => c.spkiSha256));
+  return [...ANCHORS, ...INTERMEDIATES].filter((i) => keys.has(i.spkiSha256));
+}
+
+const names = (found: Indicator[]) => [...new Set(found.map((i) => i.name))];
+
 /**
  * Matches a bundle's certificates against the indicators by public key, and
  * looks for any other key that can be recovered. A bundle that holds such a
- * key can be abused for everything it verifies.
+ * key can be abused for everything it verifies. Trust settings count per
+ * usage: a certificate rejected for TLS server authentication isn't trusted
+ * for TLS, one rejected for code signing isn't for code signing.
  */
 export async function checkBundle(
   path: string,
@@ -416,22 +439,34 @@ export async function checkBundle(
   text: string,
 ): Promise<Bundle> {
   const all = await hashBundle(text);
-  const certs = all.filter((c) => !c.rejected);
-  const keys = new Set(certs.map((c) => c.spkiSha256));
-  const anchors = ANCHORS.filter((a) => keys.has(a.spkiSha256));
-  const inters = INTERMEDIATES.filter((i) => keys.has(i.spkiSha256));
-  const weak = recoverable(certs);
   const purpose = bundlePurpose(path, source);
+  const exposes: Usage[] = [];
+  const trusted = new Set<CertHashes>();
+  for (const u of purpose) {
+    const usable = all.filter((c) => !rejectedFor(c, u));
+    for (const c of usable) trusted.add(c);
+    if (
+      indicatorsIn(usable).some((i) => i.usage.includes(u)) ||
+      recoverable(usable).length
+    ) {
+      exposes.push(u);
+    }
+  }
+  const found = indicatorsIn([...trusted]);
+  const weak = recoverable([...trusted]);
+  // Rejected for everything this bundle verifies, but not for any use.
+  const named = indicatorsIn(all.filter((c) => !c.rejects.any)).filter((i) =>
+    !found.includes(i)
+  );
   return {
     path,
     source,
     certificates: all.length,
-    anchors: anchors.map((a) => a.name),
-    intermediates: [...new Set(inters.map((i) => i.name))],
+    anchors: names(found.filter((i) => ANCHORS.includes(i))),
+    intermediates: names(found.filter((i) => !ANCHORS.includes(i))),
+    ...(named.length ? { rejectedForNamedUses: names(named) } : {}),
     ...(weak.length ? { recoverable: weak } : {}),
-    exposes: weak.length
-      ? purpose
-      : usagesOf([...anchors, ...inters]).filter((u) => purpose.includes(u)),
+    exposes,
   };
 }
 
@@ -1216,9 +1251,6 @@ function bundleFix(
       if (LINUX_KEYSTORES.includes(b.path)) break;
       return `${where}update this Java runtime to one with the fix (27.0.1.0.2, 25.0.5.0.2, 21.0.13.0.2, 17.0.21.0.2, 11.0.33.0.2 or 8u511 on the page), or replace its lib/security/blocked.certs (blacklisted.certs on JDK 8) with https://ops.java/unix/blocked.certs (windows/blocked.certs on Windows), keeping any entries of your own`;
   }
-  if (kind === "host" && b.path.endsWith("/ca-bundle.trust.crt")) {
-    return `${where}OpenSSL still trusts ${listed} here when a caller names no purpose, as blocklisted roots are rejected only for named uses; mark each blocklist file with openssl x509 -in F -out F -trustout -addreject anyExtendedKeyUsage and run update-ca-trust, or upgrade ca-certificates`;
-  }
   if (kind !== "host") {
     return `${where}rebuild the image on a base with patched ca-certificates (${
       distroFix(release)
@@ -1266,6 +1298,16 @@ export function assess(
   const remediation: string[] = [];
   const exposed = { tls: false, codeSigning: false };
   for (const b of bundles) {
+    if (b.rejectedForNamedUses?.length) {
+      findings.push(
+        `${b.path} rejects ${
+          b.rejectedForNamedUses.join(", ")
+        } for what it verifies, so TLS clients refuse them, but not for any use: OpenSSL still accepts them when a caller names no purpose, as openssl verify does`,
+      );
+      remediation.push(
+        `${b.path}: to close that too, mark each blocklisted root with openssl x509 -in F -out F -trustout -addreject anyExtendedKeyUsage and run update-ca-trust (galadran/we-have-a-problem.com#78), or upgrade ca-certificates`,
+      );
+    }
     if (
       b.gitBackend === "schannel" && b.anchors.length + b.intermediates.length
     ) {
@@ -1727,7 +1769,7 @@ export async function checkRuntime(g: GlobalArgs, run: Run) {
 
 export const model = {
   type: "@taylor/emudhra/exposure",
-  version: "2026.10.22.3",
+  version: "2026.10.22.4",
   globalArguments: GlobalArgsSchema,
   upgrades: [
     {
@@ -1761,6 +1803,14 @@ export const model = {
       toVersion: "2026.10.22.3",
       description:
         "Honours Git for Windows' http.sslBackend and checks its OpenSSL's cert.pem; the arguments are unchanged",
+      upgradeAttributes: (
+        old: Record<string, unknown>,
+      ): Record<string, unknown> => old,
+    },
+    {
+      toVersion: "2026.10.22.4",
+      description:
+        "Counts OpenSSL trust settings per usage, so a root rejected for TLS isn't TLS exposure; the arguments are unchanged",
       upgradeAttributes: (
         old: Record<string, unknown>,
       ): Record<string, unknown> => old,
