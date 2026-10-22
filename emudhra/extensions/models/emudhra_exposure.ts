@@ -101,6 +101,12 @@ const BundleSchema = z.object({
    * recovered from their public keys; present when there are any.
    */
   recoverable: z.array(z.string()).optional(),
+  /**
+   * Git for Windows' bundle: the http.sslBackend Git uses. With schannel Git
+   * verifies with the Windows store and never reads the bundle, unless
+   * http.schannelUseSSLCAInfo points schannel at it (schannel-cainfo).
+   */
+  gitBackend: z.enum(["openssl", "schannel", "schannel-cainfo"]).optional(),
   exposes: z.array(z.enum(["tls", "codeSigning"])),
 });
 /** What one PEM bundle or Java keystore trusts. */
@@ -267,6 +273,79 @@ function macSource(path: string): string {
   return path.startsWith("/opt/local/") ? "macports" : "homebrew";
 }
 
+/** Where Git for Windows keeps the bundle it reads with the openssl backend. */
+const GIT_BUNDLE = "\\mingw64\\etc\\ssl\\certs\\ca-bundle.crt";
+
+/** Git for Windows, installed for everyone or for one user. */
+function gitDirs(p: Platform): string[] {
+  return [
+    p.env("ProgramFiles") && `${p.env("ProgramFiles")}\\Git`,
+    p.env("LOCALAPPDATA") && `${p.env("LOCALAPPDATA")}\\Programs\\Git`,
+  ].filter((x): x is string => !!x);
+}
+
+/** How a Git for Windows install verifies TLS, as far as its bundle goes. */
+export type GitBackend = "openssl" | "schannel" | "schannel-cainfo";
+
+/**
+ * The http.sslBackend a Git for Windows install uses, openssl when it isn't
+ * set. Git is run from its install directory, which isn't a repository, so
+ * it merges every level but a repository's own (ProgramData, system, XDG
+ * and global) in its own order. With schannel, http.schannelUseSSLCAInfo
+ * makes Git verify against http.sslCAInfo, the bundle, after all. Null when
+ * its git can't be run.
+ */
+export async function gitBackend(
+  run: Run,
+  git: string,
+): Promise<GitBackend | null> {
+  const bin = `${git}\\cmd\\git.exe`;
+  const get = async (key: string, type: string[] = []) => {
+    const r = await run(bin, ["-C", git, "config", ...type, "--get", key]);
+    // git config exits 1 when the key isn't set.
+    if (r.code === 1) return "";
+    return r.code === 0 ? r.stdout.trim().toLowerCase() : null;
+  };
+  const backend = await get("http.sslBackend");
+  if (backend === null) return null;
+  if (backend !== "schannel") return "openssl";
+  const cainfo = await get("http.schannelUseSSLCAInfo", ["--type=bool"]);
+  if (cainfo === null) return null;
+  return cainfo === "true" ? "schannel-cainfo" : "schannel";
+}
+
+/**
+ * Records which backend each Git for Windows bundle's Git uses. With
+ * schannel, Git verifies with the Windows store and never reads the bundle,
+ * so it exposes nothing.
+ */
+export async function applyGitBackends(
+  run: Run,
+  bundles: Bundle[],
+): Promise<Bundle[]> {
+  const out: Bundle[] = [];
+  for (const b of bundles) {
+    if (b.source !== "git for windows" || !b.path.endsWith(GIT_BUNDLE)) {
+      out.push(b);
+      continue;
+    }
+    const backend = await gitBackend(
+      run,
+      b.path.slice(0, -GIT_BUNDLE.length),
+    );
+    if (!backend) {
+      out.push(b);
+      continue;
+    }
+    out.push({
+      ...b,
+      gitBackend: backend,
+      ...(backend === "schannel" ? { exposes: [] } : {}),
+    });
+  }
+  return out;
+}
+
 /** The bundles to look for on a host, labelled by where they come from. */
 export function hostBundles(
   p: Platform,
@@ -278,16 +357,16 @@ export function hostBundles(
       list.push({ path, source: macSource(path) });
     }
   } else if (p.os === "windows") {
-    // Git for Windows, installed for everyone or for one user.
-    const gits = [
-      p.env("ProgramFiles") && `${p.env("ProgramFiles")}\\Git`,
-      p.env("LOCALAPPDATA") && `${p.env("LOCALAPPDATA")}\\Programs\\Git`,
-    ];
-    for (const git of gits) {
-      if (!git) continue;
+    // Git for Windows, installed for everyone or for one user: the bundle
+    // Git reads with the openssl backend, and the default CA file of the
+    // OpenSSL it ships (OPENSSLDIR is /mingw64/etc/ssl).
+    for (const git of gitDirs(p)) {
       list.push({
-        path: `${git}\\mingw64\\etc\\ssl\\certs\\ca-bundle.crt`,
+        path: `${git}${GIT_BUNDLE}`,
         source: "git for windows",
+      }, {
+        path: `${git}\\mingw64\\etc\\ssl\\cert.pem`,
+        source: "git for windows openssl",
       });
     }
   } else {
@@ -1125,7 +1204,12 @@ function bundleFix(
     case "perl mozilla::ca":
       return `${where}upgrade Mozilla::CA to 20261020 or later`;
     case "git for windows":
-      return `${where}upgrade Git for Windows, or switch http.sslBackend to schannel`;
+      if (b.gitBackend === "schannel-cainfo") {
+        return `${where}Git uses schannel, but http.schannelUseSSLCAInfo makes it verify against this bundle; unset it with git config --global --unset http.schannelUseSSLCAInfo (or at the level that sets it, git config --show-origin --get http.schannelUseSSLCAInfo), or upgrade Git for Windows once it ships a bundle without ${listed}`;
+      }
+      return `${where}switch Git to the Windows store with git config --global http.sslBackend schannel, or upgrade Git for Windows once it ships a bundle without ${listed}`;
+    case "git for windows openssl":
+      return `${where}the OpenSSL that ships with Git (openssl.exe in Git Bash, and anything else built on it) trusts this by default; upgrade Git for Windows once it ships a bundle without ${listed}, or remove them from this file`;
     case "extra":
       return `${where}remove the certificates listed for it`;
     case "java":
@@ -1182,6 +1266,15 @@ export function assess(
   const remediation: string[] = [];
   const exposed = { tls: false, codeSigning: false };
   for (const b of bundles) {
+    if (
+      b.gitBackend === "schannel" && b.anchors.length + b.intermediates.length
+    ) {
+      findings.push(
+        `${b.path} trusts ${
+          [...b.anchors, ...b.intermediates].join(", ")
+        }, but Git uses http.sslBackend schannel, so it verifies with the Windows store and doesn't read this bundle`,
+      );
+    }
     if (!b.exposes.length) continue;
     for (const u of b.exposes) exposed[u] = true;
     const listed = [...b.anchors, ...b.intermediates];
@@ -1365,7 +1458,10 @@ async function scanHost(
     for (const path of g.keystores) keystores.push({ path, source: "extra" });
     const pem = await readHostBundles(list);
     const java = await readHostKeystores(keystores);
-    const bundles = [...pem.bundles, ...java.bundles];
+    const bundles = [
+      ...await applyGitBackends(run, pem.bundles),
+      ...java.bundles,
+    ];
     const unreadable = [...pem.unreadable, ...java.notes];
     const native = p.os === "darwin"
       ? await macNative(run, dir)
@@ -1631,7 +1727,7 @@ export async function checkRuntime(g: GlobalArgs, run: Run) {
 
 export const model = {
   type: "@taylor/emudhra/exposure",
-  version: "2026.10.22.2",
+  version: "2026.10.22.3",
   globalArguments: GlobalArgsSchema,
   upgrades: [
     {
@@ -1657,6 +1753,14 @@ export const model = {
       toVersion: "2026.10.22.2",
       description:
         "Finds Docker Desktop on Windows when it isn't running; the arguments are unchanged",
+      upgradeAttributes: (
+        old: Record<string, unknown>,
+      ): Record<string, unknown> => old,
+    },
+    {
+      toVersion: "2026.10.22.3",
+      description:
+        "Honours Git for Windows' http.sslBackend and checks its OpenSSL's cert.pem; the arguments are unchanged",
       upgradeAttributes: (
         old: Record<string, unknown>,
       ): Record<string, unknown> => old,

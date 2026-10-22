@@ -160,7 +160,17 @@ use:
 - macOS: `/etc/ssl/cert.pem`, the Homebrew `ca-certificates` and `openssl@3`
   bundles, and MacPorts' `curl-ca-bundle` (which its curl, git and OpenSSL
   use, and which has no fixed release yet).
-- Windows: Git for Windows' bundle.
+- Windows: Git for Windows' `mingw64\etc\ssl\certs\ca-bundle.crt`, which Git
+  reads with its `openssl` backend, and `mingw64\etc\ssl\cert.pem`, the
+  default CA file of the OpenSSL it ships (`openssl.exe` in Git Bash). When
+  `http.sslBackend` is `schannel`, Git verifies with the Windows store and
+  never reads `ca-bundle.crt`, so that bundle is listed but exposes nothing.
+  The setting is read the way Git reads it: from every config level but a
+  repository's (`ProgramData`, system, XDG and global), in Git's own
+  order. With `http.schannelUseSSLCAInfo` true, `schannel` verifies against
+  the bundle after all, so it stays exposed (`gitBackend: schannel-cainfo`).
+  Git's own `curl.exe` is built with Schannel only and uses the Windows store
+  too.
 - With `toolchains`: Python's `certifi`, the copy pip vendors, and Perl's
   `Mozilla::CA`. The pip of macOS's own `python3` gets the page's `PIP_CERT`
   workaround rather than an upgrade.
@@ -331,6 +341,12 @@ in `bundles` or `keystores`.
   (20.3.5 to 43.6.0) outdated, Claude Code 2.1.308 and swamp's Deno patched.
   The test suite passes on Windows too. The host scan took about 5 seconds,
   most of it PowerShell and the Electron executables.
+- The same host on 2026.10.22.3, with Git 2.54.0 set to `schannel` by its
+  installer: `ca-bundle.crt` is noted but no longer exposed, while Git's
+  `cert.pem` is (Git Bash's `openssl s_client` verifies github.com with it,
+  and fails with `SSL_CERT_FILE` pointed elsewhere). With
+  `git -c http.sslBackend=openssl`, Git reads `ca-bundle.crt`, as its
+  `CAfile` shows.
 
 ## What it runs
 
@@ -349,6 +365,8 @@ rustup --version
 mise --version
 claude --version
 docker version --format '{{.Server.Platform.Name}}'
+<git>\cmd\git.exe -C <git> config --get http.sslBackend    # Windows, per Git install
+<git>\cmd\git.exe -C <git> config --type=bool --get http.schannelUseSSLCAInfo    # when schannel
 java -XshowSettings:properties -version
 security verify-cert -c <cert> -c <cross-signed root> -l -L -p basic -v    # macOS, x16
 powershell.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass -File <script> -Data <json>   # Windows
