@@ -419,5 +419,6 @@ releases come from the page's table and the OpenJDK advisory, as of
 
 ## License
 
-AGPL-3.0-only, with the exception in [COPYING-EXCEPTION](COPYING-EXCEPTION).
-See [LICENSE](LICENSE).
+AGPL-3.0-or-later with the Swamp Extension and Definition Exception; see
+[LICENSE](LICENSE), [COPYING](COPYING) and
+[COPYING-EXCEPTION](COPYING-EXCEPTION).

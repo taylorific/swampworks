@@ -173,6 +173,6 @@ The tests run every method against a fake runtime CLI.
 
 ## License
 
-AGPL-3.0 with the Swamp Extension and Definition Exception; see
+AGPL-3.0-or-later with the Swamp Extension and Definition Exception; see
 [LICENSE](LICENSE), [COPYING](COPYING) and
 [COPYING-EXCEPTION](COPYING-EXCEPTION).

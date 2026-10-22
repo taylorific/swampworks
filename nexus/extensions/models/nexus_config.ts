@@ -1070,13 +1070,18 @@ const describeChange = (c: Change) =>
 /** The `@taylor/nexus/config` swamp model type. */
 export const model = {
   type: "@taylor/nexus/config",
-  version: "2026.10.14.1",
+  version: "2026.10.22.1",
   globalArguments: GlobalArgsSchema,
   upgrades: [
     {
       toVersion: "2026.10.14.1",
       description:
         "apply clears cleanup policies, routing rules and remote credentials removed from the declaration; no settings changed",
+      upgradeAttributes: (old: Record<string, unknown>) => old,
+    },
+    {
+      toVersion: "2026.10.22.1",
+      description: "Relicenses under AGPL-3.0-or-later; no settings changed",
       upgradeAttributes: (old: Record<string, unknown>) => old,
     },
   ],

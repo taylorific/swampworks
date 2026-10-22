@@ -1769,7 +1769,7 @@ export async function checkRuntime(g: GlobalArgs, run: Run) {
 
 export const model = {
   type: "@taylor/emudhra/exposure",
-  version: "2026.10.22.4",
+  version: "2026.10.22.5",
   globalArguments: GlobalArgsSchema,
   upgrades: [
     {
@@ -1814,6 +1814,11 @@ export const model = {
       upgradeAttributes: (
         old: Record<string, unknown>,
       ): Record<string, unknown> => old,
+    },
+    {
+      toVersion: "2026.10.22.5",
+      description: "Relicenses under AGPL-3.0-or-later; no settings changed",
+      upgradeAttributes: (old: Record<string, unknown>) => old,
     },
   ],
   resources: {
