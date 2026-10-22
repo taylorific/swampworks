@@ -244,7 +244,6 @@ request that touches this extension.
 
 ## License
 
-Licensed under the GNU Affero General Public License version 3 with the Swamp
-Extension and Definition Exception — the same terms as the official swamp
-extensions. See [LICENSE](LICENSE), [COPYING](COPYING), and
+AGPL-3.0-or-later with the Swamp Extension and Definition Exception; see
+[LICENSE](LICENSE), [COPYING](COPYING) and
 [COPYING-EXCEPTION](COPYING-EXCEPTION).

@@ -1,7 +1,7 @@
 manifestVersion: 1
 name: "@taylor/whisper-transcriber"
-version: "2026.10.14.2"
-license: AGPL-3.0-only
+version: "2026.10.22.1"
+license: AGPL-3.0-or-later
 description: "Transcribe meeting audio locally with Whisper (faster-whisper, large-v3 by default) in a container under Apple's container CLI or Docker. Writes a timestamped text transcript plus SRT, WebVTT and JSON with word-level timestamps; the image builds itself on first use and model weights are cached between runs."
 repository: "https://github.com/taylorific/swampworks"
 models:

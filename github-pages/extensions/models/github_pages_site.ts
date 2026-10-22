@@ -105,12 +105,17 @@ export function parseOrThrow(
 /** The `@taylor/github-pages/site` swamp model type. */
 export const model = {
   type: "@taylor/github-pages/site",
-  version: "2026.10.14.1",
+  version: "2026.10.22.1",
   globalArguments: GlobalArgsSchema,
   upgrades: [
     {
       toVersion: "2026.10.14.1",
       description: "Declares the license in the manifest; no settings changed",
+      upgradeAttributes: (old: Record<string, unknown>) => old,
+    },
+    {
+      toVersion: "2026.10.22.1",
+      description: "Relicenses under AGPL-3.0-or-later; no settings changed",
       upgradeAttributes: (old: Record<string, unknown>) => old,
     },
   ],

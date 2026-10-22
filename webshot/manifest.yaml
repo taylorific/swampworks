@@ -1,7 +1,7 @@
 manifestVersion: 1
 name: "@taylor/webshot"
-version: "2026.10.14.1"
-license: AGPL-3.0-only
+version: "2026.10.22.1"
+license: AGPL-3.0-or-later
 description: "Full-page screenshots of web pages (PNG, JPEG, WebP). Runs headless Chrome in a fresh, version-pinned Docker container with Noto fonts (or a local Chrome), scrolls to the bottom so lazy content renders, hides cookie banners and fixed overlays, stitches pages taller than Chrome's capture limit, records the HTTP status, and stores the image plus capture metadata as swamp data."
 repository: "https://github.com/taylorific/swampworks"
 models:
