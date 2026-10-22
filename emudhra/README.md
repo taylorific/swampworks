@@ -335,7 +335,11 @@ same bundles, keystores, toolchains, Electron apps, lockfiles and (on macOS)
 dozen round trips over one shared connection (`ControlMaster`; not when swamp
 itself runs on Windows, whose OpenSSH can't share one). The commands run in
 ssh's non-interactive shell, so a tool only on an interactive `PATH` (nvm,
-asdf, a profile edit) isn't seen; name its bundles in `bundles`.
+asdf, a profile edit) isn't seen; name its bundles in `bundles`. If the
+connection drops partway through, the machine is recorded under `errors` in the
+summary rather than with a partial result, since a tool that couldn't be asked
+would otherwise look not installed. The `ssh-available` check makes sure `ssh`
+is installed before a scan with `sshHosts`.
 
 **Containers.** The scan copies the bundles, Java keystores and
 `/etc/os-release` out with `docker cp`, so it needs nothing inside the image,
@@ -422,6 +426,17 @@ in `bundles` or `keystores`.
   outdated; once `openjdk21-jre-headless` (and the fixed `ca-certificates`
   it pulls in) is installed, the bundle and the JRE's `cacerts`, found
   through `/usr/lib/jvm`, are clean. The scan took about 0.6 seconds.
+- 22 October 2026, 2026.10.22.6, over real SSH: an Ubuntu 26.04.1 LTS server
+  with `ca-certificates` 20260601~26.04.1 is exposed for TLS through
+  `/etc/ssl/certs/ca-certificates.crt` (emSign ECC Root CA - G3 still
+  enabled in `/etc/ca-certificates.conf`), in about 1.5 seconds. Ubuntu's
+  packaged certifi points at that bundle and counts once.
+- The same day, this macOS 27.0.1 machine scanned over SSH to itself and
+  locally: identical bundles (seven JetBrains runtimes and the Command Line
+  Tools pip bundle exposed), all 16 `security verify-cert` verdicts and all 20
+  findings. The SSH scan didn't see `claude` and Docker Desktop's `docker`,
+  which aren't on a non-interactive `PATH`, or swamp's own Deno, which only the
+  local scan checks; all three are patched. 1.6 seconds over SSH, 0.5 locally.
 
 ## What it runs
 

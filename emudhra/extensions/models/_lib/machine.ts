@@ -228,6 +228,12 @@ export function remoteFs(run: Run): Fs {
     new Error(
       `${what} ${path}: ${r.stderr || r.stdout || `exit ${r.code}`}`,
     );
+  // The listing scripts end with exit 0, so any other code means ssh or the
+  // command itself failed (127 when it timed out), not that nothing is there.
+  const listed = (what: string, path: string, r: RunResult) => {
+    if (r.code !== 0) throw fail(`Could not ${what}`, path, r);
+    return lines(r.stdout);
+  };
   return {
     sep: "/",
     async read(path) {
@@ -259,7 +265,7 @@ printf '%s\\n' "$p"`,
         root,
         String(depth),
       );
-      return lines(r.stdout).sort();
+      return listed("list", root, r).sort();
     },
     async existing(paths, kind) {
       const out = new Set<string>();
@@ -269,7 +275,7 @@ printf '%s\\n' "$p"`,
           kind === "dir" ? "-d" : "-f",
           ...paths.slice(i, i + BATCH),
         );
-        for (const l of lines(r.stdout)) out.add(l);
+        for (const l of listed("check", paths[i], r)) out.add(l);
       }
       return out;
     },
@@ -280,10 +286,11 @@ for f in * .[!.]*; do
   [ -f "$f" ] && [ ! -L "$f" ] || continue
   x=-; [ -x "$f" ] && x=x
   printf '%s\\t%s\\t%s\\n' "$(wc -c < "$f" | tr -d ' ')" "$x" "$f"
-done`,
+done
+exit 0`,
         dir,
       );
-      return lines(r.stdout).map((l) => {
+      return listed("list", dir, r).map((l) => {
         const [size, x, ...name] = l.split("\t");
         return {
           path: `${dir}/${name.join("\t")}`,
@@ -322,7 +329,7 @@ done`,
         ...roots.map((p) => /^[-(!]/.test(p) ? `./${p}` : p),
         ...expr,
       );
-      return lines(r.stdout);
+      return listed("search", roots.join(", "), r);
     },
     async tempDir() {
       const r = await run("mktemp", ["-d"]);
