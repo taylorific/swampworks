@@ -701,6 +701,28 @@ async function toolchainVersions(run: Run): Promise<Toolchain[]> {
   return out;
 }
 
+/**
+ * Docker Desktop on Windows when it isn't running, so `docker version` can't
+ * name it: the installer records the version in componentsVersion.json.
+ */
+export async function dockerDesktopInstalled(
+  p: Platform,
+): Promise<Toolchain | null> {
+  const pf = p.env("ProgramFiles");
+  if (p.os !== "windows" || !pf) return null;
+  const dir = `${pf}\\Docker\\Docker`;
+  try {
+    const v = JSON.parse(
+      await Deno.readTextFile(`${dir}\\resources\\componentsVersion.json`),
+    ).appVersion;
+    return typeof v === "string" && /^\d+\.\d+\.\d+$/.test(v)
+      ? toolchain("docker-desktop", v, dir)
+      : null;
+  } catch {
+    return null;
+  }
+}
+
 /** The Deno this code is running on, which is swamp's own under swamp. */
 export function denoRuntime(): DenoRuntime {
   return { version: Deno.version.deno, execPath: Deno.execPath() };
@@ -1333,6 +1355,10 @@ async function scanHost(
         swampDeno(deno),
         ...await electronApps(appRoots(p), p.os),
       ];
+      if (!toolchains.some((t) => t.tool === "docker-desktop")) {
+        const dd = await dockerDesktopInstalled(p);
+        if (dd) toolchains.push(dd);
+      }
     }
     for (const path of g.keystores) keystores.push({ path, source: "extra" });
     const pem = await readHostBundles(list);
@@ -1603,7 +1629,7 @@ export async function checkRuntime(g: GlobalArgs, run: Run) {
 
 export const model = {
   type: "@taylor/emudhra/exposure",
-  version: "2026.10.22.1",
+  version: "2026.10.22.2",
   globalArguments: GlobalArgsSchema,
   upgrades: [
     {
@@ -1621,6 +1647,14 @@ export const model = {
       toVersion: "2026.10.22.1",
       description:
         "New checks and patched releases; the arguments are unchanged",
+      upgradeAttributes: (
+        old: Record<string, unknown>,
+      ): Record<string, unknown> => old,
+    },
+    {
+      toVersion: "2026.10.22.2",
+      description:
+        "Finds Docker Desktop on Windows when it isn't running; the arguments are unchanged",
       upgradeAttributes: (
         old: Record<string, unknown>,
       ): Record<string, unknown> => old,

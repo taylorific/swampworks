@@ -242,7 +242,7 @@ the patched release on the page counts as TLS exposure:
 | rustup         | 1.29.2                    | `rustup --version`                                 |
 | mise           | 2026.10.17                | `mise --version`                                   |
 | Claude Code    | 2.1.303                   | `claude --version`                                 |
-| Docker Desktop | 4.96.2                    | `docker version` (only while Docker Desktop runs)  |
+| Docker Desktop | 4.96.2                    | `docker version` while it runs; on Windows, else its `componentsVersion.json` |
 
 Node.js and Go have a fix per release line: a version on an older line with no
 fix counts as exposed, and one on a newer line counts as patched. Bun has no
@@ -323,6 +323,14 @@ in `bundles` or `keystores`.
   and ten Electron apps outdated, Claude Code 2.1.308 and swamp's Deno
   patched. The whole host scan, including the recoverable-key check, took
   0.4 seconds.
+- Windows 11 Pro host, 22 October 2026 (swamp 20261022.021804.0, Deno 2.9.8):
+  CryptoAPI blocks all 16 certificates (the Disallowed store). Git for
+  Windows' per-user bundle and eight JetBrains runtimes trust AAA Certificate
+  Services and emSign ECC Root CA - G3, so the host is exposed for TLS and code
+  signing. Docker Desktop 4.95.0 (not running) and four Electron apps
+  (20.3.5 to 43.6.0) outdated, Claude Code 2.1.308 and swamp's Deno patched.
+  The test suite passes on Windows too. The host scan took about 5 seconds,
+  most of it PowerShell and the Electron executables.
 
 ## What it runs
 
@@ -361,9 +369,10 @@ docker inspect <name>                      # or: container inspect <name>
 docker cp -L <name>:<path> <temp file>     # or: container cp <name>:<path> <temp file>
 ```
 
-Everything else is read in place: bundles, keystores and `blocked.certs`, and
-each Electron app's main executable, which is streamed in 4 MB chunks to find
-its version. Certificates and the PowerShell script go in a temporary directory
+Everything else is read in place: bundles, keystores and `blocked.certs`,
+Docker Desktop's `componentsVersion.json` on Windows, and each Electron app's
+main executable, which is streamed in 4 MB chunks to find its version.
+Certificates and the PowerShell script go in a temporary directory
 that is removed afterwards. Nothing is sent over the network except what the OS
 verifiers and container runtimes do themselves (Windows may fetch roots from
 Windows Update; an image that isn't local gets pulled).

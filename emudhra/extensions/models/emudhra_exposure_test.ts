@@ -11,6 +11,7 @@ import {
   checkKeystore,
   checkRuntime,
   distroFix,
+  dockerDesktopInstalled,
   electronApps,
   electronVersion,
   hostBundles,
@@ -954,6 +955,32 @@ Deno.test("electronApps finds apps with resources/app in the install directory o
     );
   } finally {
     await Deno.remove(root, { recursive: true });
+  }
+});
+
+Deno.test("dockerDesktopInstalled reads the Windows install's componentsVersion.json", async () => {
+  const pf = await Deno.makeTempDir();
+  const p = (os: string): Platform => ({
+    os,
+    env: (n) => n === "ProgramFiles" ? pf : undefined,
+  });
+  try {
+    assertEquals(await dockerDesktopInstalled(p("windows")), null);
+    const res = `${pf}/Docker/Docker/resources`;
+    await Deno.mkdir(res, { recursive: true });
+    await Deno.writeTextFile(
+      `${res}/componentsVersion.json`,
+      JSON.stringify({ appVersion: "4.95.0", buildNumber: "242831" }),
+    );
+    const dd = await dockerDesktopInstalled(p("windows"));
+    assertEquals([dd?.tool, dd?.version, dd?.status], [
+      "docker-desktop",
+      "4.95.0",
+      "outdated",
+    ]);
+    assertEquals(await dockerDesktopInstalled(p("linux")), null);
+  } finally {
+    await Deno.remove(pf, { recursive: true });
   }
 });
 
