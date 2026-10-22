@@ -7,6 +7,23 @@ import {
   type Usage,
 } from "./_lib/indicators.ts";
 import { parseBlockedCerts, readKeystore } from "./_lib/keystore.ts";
+import {
+  DEPENDENCY_FIXES,
+  type Ecosystem,
+  LOCKFILES,
+  parseLockfile,
+  type Pinned,
+  PRUNE,
+  updateCommand,
+} from "./_lib/lockfiles.ts";
+import {
+  type Fs,
+  LOCAL_FS,
+  remoteFs,
+  type Run,
+  type RunResult,
+  sshRunner,
+} from "./_lib/machine.ts";
 import { recoverableScalar } from "./_lib/weakkey.ts";
 import {
   type CertHashes,
@@ -18,9 +35,10 @@ import {
 
 // Exposure to the eMudhra intermediates whose private keys anyone can
 // recover (https://emudhra.we-have-a-problem.com/, disclosed 2026-10-20).
-// `scan` looks at the machine swamp runs on and at any container images or
-// running containers named in the arguments, and records for each whether it
-// still trusts those intermediates for TLS or code signing:
+// `scan` looks at the machine swamp runs on, at Linux and macOS machines
+// over SSH, and at any container images or running containers named in the
+// arguments, and records for each whether it still trusts those
+// intermediates for TLS or code signing:
 //
 // - PEM CA bundles (the system bundle, Homebrew, MacPorts, Python certifi,
 //   pip, Perl's Mozilla::CA, Git for Windows, and any others named) are
@@ -39,12 +57,16 @@ import {
 //   intermediate, which is how the JDK fix ships. They are read without
 //   keytool, so this works in containers too.
 // - Node.js, Go, Bun, uv, pixi, rustup, mise, Claude Code, Docker Desktop,
-//   Electron apps, and the Deno that swamp itself runs on carry their own
-//   roots or verifier, so their versions are compared with the patched
-//   releases.
+//   cloudflared, Cloudflare WARP, Electron apps, and the Deno that swamp
+//   itself runs on carry their own roots or verifier, so their versions are
+//   compared with the patched releases.
+// - Lockfiles under the search paths (Cargo, Mix, rebar3, uv, Poetry, PDM,
+//   Pipenv, Composer) are checked for packages that carry their own roots.
 //
 // Nothing is changed. Containers are read with `docker cp` or `container cp`;
-// an image gets a container created for the copy and removed after.
+// an image gets a container created for the copy and removed after. Over
+// SSH, files are read with `base64` and directories listed with `find`, and
+// one connection is shared for the whole scan of a machine.
 
 const RUNTIMES = ["docker", "container"] as const;
 type Runtime = typeof RUNTIMES[number];
@@ -59,6 +81,18 @@ const GlobalArgsSchema = z.object({
   containers: z.array(z.string().min(1)).default([]).describe(
     "Running containers to scan, by name or ID",
   ),
+  sshHosts: z.array(z.string().min(1)).default([]).describe(
+    'Linux and macOS machines to scan over SSH, as ssh destinations, e.g. ["web1", "admin@db1", "ssh://admin@db2:2222"]',
+  ),
+  sshKey: z.string().optional().describe(
+    "Private key to log in with over SSH; otherwise ssh's own configuration and agent decide",
+  ),
+  sshOptions: z.array(z.string()).default([]).describe(
+    'More ssh arguments, ahead of the scan\'s own so they win, e.g. ["-J", "bastion"] or ["-o", "User=admin"]',
+  ),
+  searchPaths: z.array(z.string().min(1)).default([]).describe(
+    "Directories to search for lockfiles (Cargo, Mix, rebar3, uv, Poetry, PDM, Pipenv, Composer), on the host and over SSH",
+  ),
   runtime: z.enum(RUNTIMES).default("docker").describe(
     "Container runtime: docker (or podman via runtimePath), or container (Apple's container CLI)",
   ),
@@ -72,7 +106,7 @@ const GlobalArgsSchema = z.object({
     "More Java keystores (JKS or PKCS#12) to check, on the host and in every container",
   ),
   toolchains: z.boolean().default(true).describe(
-    "On the host, also check Python certifi, pip, Perl Mozilla::CA, Java runtimes, Node.js, Go, Deno, Bun, uv, pixi, rustup, mise, Claude Code, Docker Desktop and Electron apps",
+    "On the host and over SSH, also check Python certifi, pip, Perl Mozilla::CA, Java runtimes, Node.js, Go, Deno, Bun, uv, pixi, rustup, mise, Claude Code, Docker Desktop, cloudflared, Cloudflare WARP and Electron apps",
   ),
 });
 type GlobalArgs = z.infer<typeof GlobalArgsSchema>;
@@ -144,9 +178,22 @@ const ToolchainSchema = z.object({
 /** A toolchain or app that carries its own roots. */
 export type Toolchain = z.infer<typeof ToolchainSchema>;
 
+const DependencySchema = z.object({
+  lockfile: z.string(),
+  ecosystem: z.enum(["cargo", "hex", "pypi", "composer"]),
+  package: z.string(),
+  version: z.string(),
+  fixedIn: z.array(z.string()),
+  /** Where the fix stands when no release has it. */
+  note: z.string().optional(),
+  status: z.enum(["patched", "outdated"]),
+});
+/** A package pinned in a lockfile that carries its own roots. */
+export type Dependency = z.infer<typeof DependencySchema>;
+
 const TargetSchema = z.object({
   target: z.string(),
-  kind: z.enum(["host", "image", "container"]),
+  kind: z.enum(["host", "ssh", "image", "container"]),
   os: z.string(),
   distro: z.string().nullable(),
   status: z.enum(STATUS),
@@ -155,6 +202,7 @@ const TargetSchema = z.object({
   bundles: z.array(BundleSchema),
   native: z.array(NativeSchema),
   toolchains: z.array(ToolchainSchema),
+  dependencies: z.array(DependencySchema),
   findings: z.array(z.string()),
   remediation: z.array(z.string()),
   checkedAt: z.string(),
@@ -189,15 +237,7 @@ interface CheckContext {
   globalArgs: GlobalArgs;
 }
 
-/** Result of one command. `code` is 127 when the command can't be run. */
-export interface RunResult {
-  code: number;
-  stdout: string;
-  stderr: string;
-}
-
-/** Runs a command with the given arguments. Injectable for tests. */
-export type Run = (cmd: string, args: string[]) => Promise<RunResult>;
+export type { Fs, Run, RunResult };
 
 /** The operating system and the environment. */
 export interface Platform {
@@ -214,6 +254,7 @@ export interface DenoRuntime {
 /** Test seams accepted by `scan`. */
 export interface Seams {
   _run?: Run;
+  _fs?: Fs;
   _platform?: Platform;
   _deno?: DenoRuntime;
 }
@@ -223,7 +264,7 @@ export function commandRunner(timeoutMs = 120000): Run {
   return async (cmd, args) => {
     let out: Deno.CommandOutput;
     try {
-      // swamp-quality-ignore deno-command: runs the container runtime, security, powershell, python and version queries; argument lists are built in this file, see README What it runs
+      // swamp-quality-ignore deno-command: runs ssh, the container runtime, security, powershell, python and version queries; argument lists are built in this file and _lib/machine.ts, see README What it runs
       out = await new Deno.Command(cmd, {
         args,
         stdin: "null",
@@ -556,13 +597,17 @@ export function macVerdict(
 }
 
 /** Asks the macOS Security framework about each intermediate. */
-async function macNative(run: Run, dir: string): Promise<NativeResult[]> {
+async function macNative(
+  run: Run,
+  dir: string,
+  fs: Fs,
+): Promise<NativeResult[]> {
   const cross = `${dir}/cross.pem`;
-  await Deno.writeTextFile(cross, toPem(CROSS_SIGNED_TLS_ROOT));
+  await fs.writeText(cross, toPem(CROSS_SIGNED_TLS_ROOT));
   const out: NativeResult[] = [];
   for (const [n, i] of INTERMEDIATES.entries()) {
     const file = `${dir}/intermediate-${n}.pem`;
-    await Deno.writeTextFile(file, toPem(i.der));
+    await fs.writeText(file, toPem(i.der));
     // -l: the certificate is a CA; -L: no fetching. Apple's block list is
     // local, so it still applies.
     const r = await run("security", [
@@ -711,6 +756,10 @@ export const PATCHED: Record<string, string[]> = {
   mise: ["2026.10.17"],
   "claude-code": ["2.1.303"],
   "docker-desktop": ["4.96.2"],
+  // Not on the page: from Cloudflare's post
+  // (https://blog.cloudflare.com/emudhra-certificate-compromise).
+  cloudflared: ["2026.10.2"],
+  "cloudflare-warp": ["2026.8.2115.0"],
 };
 
 /** Where the fix stands for a tool with no patched release. */
@@ -763,6 +812,8 @@ export const LINE_PARTS: Record<string, number> = {
   mise: 0,
   "claude-code": 0,
   "docker-desktop": 0,
+  cloudflared: 0,
+  "cloudflare-warp": 0,
 };
 
 /** One tool's version against its patched releases. */
@@ -781,6 +832,77 @@ export function toolchain(
       ? "patched"
       : "outdated",
   };
+}
+
+/** One package pinned in a lockfile, against its patched releases. */
+export function dependency(lockfile: string, pin: Pinned): Dependency {
+  const fix = DEPENDENCY_FIXES[`${pin.ecosystem}:${pin.package}`];
+  return {
+    lockfile,
+    ...pin,
+    fixedIn: fix.fixedIn,
+    ...(fix.note ? { note: fix.note } : {}),
+    status: isPatched(pin.version, fix.fixedIn, fix.lineParts)
+      ? "patched"
+      : "outdated",
+  };
+}
+
+/**
+ * The watched packages pinned in lockfiles under the search paths, and notes
+ * on search paths that aren't there and lockfiles that can't be read.
+ */
+export async function lockfileDependencies(
+  fs: Fs,
+  searchPaths: string[],
+): Promise<{ dependencies: Dependency[]; notes: string[] }> {
+  const notes: string[] = [];
+  if (!searchPaths.length) return { dependencies: [], notes };
+  const dirs = await fs.existing(searchPaths, "dir");
+  const files = await fs.existing(searchPaths, "file");
+  for (const p of searchPaths) {
+    if (!dirs.has(p) && !files.has(p)) notes.push(`Search path ${p} not found`);
+  }
+  const dependencies: Dependency[] = [];
+  const paths = await fs.find(
+    searchPaths.filter((p) => dirs.has(p) || files.has(p)),
+    Object.keys(LOCKFILES),
+    8,
+    PRUNE,
+  );
+  for (const path of paths.sort()) {
+    let bytes: Uint8Array | null;
+    try {
+      bytes = await fs.read(path);
+    } catch (err) {
+      notes.push(`Could not read ${path}: ${(err as Error).message}`);
+      continue;
+    }
+    if (!bytes) continue;
+    for (const pin of parseLockfile(path, new TextDecoder().decode(bytes))) {
+      dependencies.push(dependency(path, pin));
+    }
+  }
+  return { dependencies, notes };
+}
+
+/** What to do about one outdated package in a lockfile. */
+function dependencyFix(d: Dependency): string {
+  if (!d.fixedIn.length) {
+    const instead: Partial<Record<Ecosystem, string>> = {
+      hex: "castore 1.0.22 or a patched system store",
+    };
+    return `${d.lockfile}: ${d.package} has no release with the fix yet (${
+      d.note ?? "none yet"
+    }); until it does, verify against ${
+      instead[d.ecosystem] ?? "a patched CA bundle"
+    } instead`;
+  }
+  return `${d.lockfile}: update ${d.package} to ${
+    d.fixedIn.join(", ")
+  } or later (${
+    updateCommand(d.lockfile, d.package)
+  }), then rebuild and redeploy what it builds`;
 }
 
 /** How to ask each tool on PATH for its version. */
@@ -802,6 +924,9 @@ export const PROBES: [keyof typeof PATCHED, string, string[], RegExp][] = [
     ["version", "--format", "{{.Server.Platform.Name}}"],
     /Docker Desktop (\d+\.\d+\.\d+)/,
   ],
+  // "cloudflared version 2026.10.2 (built ...)"
+  ["cloudflared", "cloudflared", ["--version"], /version (\d+\.\d+\.\d+)/],
+  ["cloudflare-warp", "warp-cli", ["--version"], /(\d{4}\.\d+\.\d+(?:\.\d+)?)/],
 ];
 
 /** The versions of the tools on PATH, against the patched releases. */
@@ -839,6 +964,33 @@ export async function dockerDesktopInstalled(
   }
 }
 
+/**
+ * Cloudflare WARP when warp-cli isn't on PATH: the app's bundle version on
+ * macOS, and on Windows the warp-cli in its install directory.
+ */
+export async function warpInstalled(
+  run: Run,
+  p: Platform,
+  fs: Fs,
+): Promise<Toolchain | null> {
+  if (p.os === "darwin") {
+    const app = "/Applications/Cloudflare WARP.app";
+    const plist = await fs.read(`${app}/Contents/Info.plist`).catch(() => null);
+    const v = plist && new TextDecoder().decode(plist).match(
+      /<key>CFBundleShortVersionString<\/key>\s*<string>([\d.]+)<\/string>/,
+    )?.[1];
+    return v ? toolchain("cloudflare-warp", v, app) : null;
+  }
+  const pf = p.env("ProgramFiles");
+  if (p.os !== "windows" || !pf) return null;
+  const dir = `${pf}\\Cloudflare\\Cloudflare WARP`;
+  const r = await run(`${dir}\\warp-cli.exe`, ["--version"]);
+  const v = r.code === 0
+    ? r.stdout.match(/(\d{4}\.\d+\.\d+(?:\.\d+)?)/)?.[1]
+    : undefined;
+  return v ? toolchain("cloudflare-warp", v, dir) : null;
+}
+
 /** The Deno this code is running on, which is swamp's own under swamp. */
 export function denoRuntime(): DenoRuntime {
   return { version: Deno.version.deno, execPath: Deno.execPath() };
@@ -855,60 +1007,28 @@ export function swampDeno(d: DenoRuntime): Toolchain {
 }
 
 /**
- * Reads a binary in chunks for the version Electron builds into its user
- * agent, `Electron/<version>`. The string sits deep in a 200 MB executable,
- * so it is streamed rather than read whole.
+ * Reads a binary for the version Electron builds into its user agent,
+ * `Electron/<version>`.
  */
-export async function electronVersion(path: string): Promise<string | null> {
-  const pattern = /Electron\/(\d+\.\d+\.\d+)/;
-  const dec = new TextDecoder("latin1");
-  const file = await Deno.open(path);
-  try {
-    const buf = new Uint8Array(4 << 20);
-    let tail = "";
-    for (;;) {
-      const n = await file.read(buf);
-      if (n === null) return null;
-      const text = tail + dec.decode(buf.subarray(0, n));
-      const m = text.match(pattern);
-      if (m) return m[1];
-      // Keep enough to catch a match split across reads.
-      tail = text.slice(-32);
-    }
-  } finally {
-    file.close();
-  }
-}
-
-async function isDir(path: string): Promise<boolean> {
-  try {
-    return (await Deno.stat(path)).isDirectory;
-  } catch {
-    return false;
-  }
-}
-
-async function exists(path: string): Promise<boolean> {
-  try {
-    await Deno.stat(path);
-    return true;
-  } catch {
-    return false;
-  }
+export async function electronVersion(
+  path: string,
+  fs: Fs = LOCAL_FS,
+): Promise<string | null> {
+  const m = await fs.firstMatch(path, "Electron/[0-9]+\\.[0-9]+\\.[0-9]+");
+  return m?.match(/Electron\/(\d+\.\d+\.\d+)/)?.[1] ?? null;
 }
 
 /** Joins paths on the machine swamp runs on. */
 const SEP = Deno.build.os === "windows" ? "\\" : "/";
 
-/** The subdirectories of a directory; none when it can't be read. */
-async function subdirs(dir: string): Promise<string[]> {
-  const out: string[] = [];
-  try {
-    for await (const e of Deno.readDir(dir)) {
-      if (e.isDirectory) out.push(`${dir}${SEP}${e.name}`);
-    }
-  } catch { /* missing or unreadable */ }
-  return out.sort();
+/** Directories from `Fs.dirs`, grouped under their parents. */
+function byParent(dirs: string[], sep: string): Map<string, string[]> {
+  const out = new Map<string, string[]>();
+  for (const d of dirs) {
+    const parent = d.slice(0, d.lastIndexOf(sep));
+    out.set(parent, [...out.get(parent) ?? [], d]);
+  }
+  return out;
 }
 
 /** Where to look for installed applications, per OS. */
@@ -943,69 +1063,73 @@ export async function electronApps(
   roots: string[],
   os: string,
   minSize = 50 << 20,
+  fs: Fs = LOCAL_FS,
 ): Promise<Toolchain[]> {
   const out: Toolchain[] = [];
+  const sep = fs.sep;
   // A root can sit inside another (LOCALAPPDATA\Programs); it isn't an app.
   const seen = new Set<string>(roots);
   for (const root of roots) {
-    for (const dir of await subdirs(root)) {
-      if (seen.has(dir)) continue;
-      seen.add(dir);
-      let version: string | null = null;
-      if (os === "darwin") {
-        if (!dir.endsWith(".app")) continue;
-        try {
-          const plist = await Deno.readTextFile(
-            `${dir}/Contents/Frameworks/Electron Framework.framework/Resources/Info.plist`,
-          );
-          version = plist.match(
-            /<key>CFBundleVersion<\/key>\s*<string>([^<]+)<\/string>/,
-          )?.[1] ?? null;
-        } catch { /* not Electron */ }
-      } else {
-        version = await electronDirVersion(dir, os, minSize);
+    // Every lookup covers all of a root's apps at once, which over SSH is
+    // one round trip instead of one per directory.
+    const tree = byParent(await fs.dirs(root, os === "darwin" ? 1 : 2), sep);
+    const apps = (tree.get(root) ?? []).filter((d) => !seen.has(d));
+    for (const d of apps) seen.add(d);
+    if (os === "darwin") {
+      const plist = (d: string) =>
+        `${d}/Contents/Frameworks/Electron Framework.framework/Resources/Info.plist`;
+      const found = await fs.existing(
+        apps.filter((d) => d.endsWith(".app")).map(plist),
+        "file",
+      );
+      for (const d of apps.filter((d) => found.has(plist(d)))) {
+        const bytes = await fs.read(plist(d)).catch(() => null);
+        const version = bytes && new TextDecoder().decode(bytes).match(
+          /<key>CFBundleVersion<\/key>\s*<string>([^<]+)<\/string>/,
+        )?.[1];
+        if (version) out.push(toolchain("electron", version, d));
       }
-      if (version) out.push(toolchain("electron", version, dir));
+      continue;
+    }
+    const res = (d: string) => `${d}${sep}resources${sep}`;
+    const candidates = new Map(
+      apps.map((d) => [d, [d, ...tree.get(d) ?? []]]),
+    );
+    const all = [...candidates.values()].flat();
+    const asar = await fs.existing(all.map((d) => `${res(d)}app.asar`), "file");
+    const app = await fs.existing(all.map((d) => `${res(d)}app`), "dir");
+    for (const [d, list] of candidates) {
+      const appDir = list.find((x) =>
+        asar.has(`${res(x)}app.asar`) || app.has(`${res(x)}app`)
+      );
+      if (!appDir) continue;
+      const version = await electronDirVersion(d, appDir, os, minSize, fs);
+      if (version) out.push(toolchain("electron", version, d));
     }
   }
   return out;
 }
 
+/** The Electron version an app's largest executable reports. */
 async function electronDirVersion(
   dir: string,
+  appDir: string,
   os: string,
   minSize: number,
+  fs: Fs,
 ): Promise<string | null> {
-  let appDir: string | null = null;
-  for (const d of [dir, ...await subdirs(dir)]) {
-    const res = `${d}${SEP}resources${SEP}`;
-    if (await exists(`${res}app.asar`) || await isDir(`${res}app`)) {
-      appDir = d;
-      break;
-    }
-  }
-  if (!appDir) return null;
-  const exes: { path: string; size: number }[] = [];
+  const exes = [];
   for (const d of new Set([dir, appDir])) {
-    try {
-      for await (const e of Deno.readDir(d)) {
-        if (!e.isFile) continue;
-        if (os === "windows" && !e.name.toLowerCase().endsWith(".exe")) {
-          continue;
-        }
-        const path = `${d}${SEP}${e.name}`;
-        const st = await Deno.stat(path);
-        if (st.size < minSize) continue;
-        if (os !== "windows" && st.mode !== null && !(st.mode & 0o111)) {
-          continue;
-        }
-        exes.push({ path, size: st.size });
-      }
-    } catch { /* unreadable */ }
+    for (const f of await fs.files(d)) {
+      if (f.size < minSize) continue;
+      if (os === "windows" && !f.path.toLowerCase().endsWith(".exe")) continue;
+      if (os !== "windows" && !f.executable) continue;
+      exes.push(f);
+    }
   }
   for (const { path } of exes.sort((a, b) => b.size - a.size)) {
     try {
-      const v = await electronVersion(path);
+      const v = await electronVersion(path, fs);
       if (v) return v;
     } catch { /* unreadable */ }
   }
@@ -1036,22 +1160,14 @@ export function blockListPaths(blocked: string): string[] {
   return [blocked, blocked.replace(/blocked\.certs$/, "blacklisted.certs")];
 }
 
-/** The trust store and block list of a Java home, if it has them. */
-async function javaHomeKeystore(
-  home: string,
-): Promise<KeystoreRef | null> {
-  // JDK 9 and later keep them in lib/security; JDK 8 in jre/lib/security.
-  for (const sec of ["lib", "jre/lib"]) {
-    const dir = `${home}${SEP}${sec.replaceAll("/", SEP)}${SEP}security${SEP}`;
-    if (await exists(`${dir}cacerts`)) {
-      return {
-        path: `${dir}cacerts`,
-        source: "java",
-        blocked: `${dir}blocked.certs`,
-      };
-    }
-  }
-  return null;
+/**
+ * Where a Java home keeps its trust store: lib/security in JDK 9 and later,
+ * jre/lib/security in JDK 8.
+ */
+function javaSecurityDirs(home: string, sep: string): string[] {
+  return ["lib", "jre/lib"].map((sec) =>
+    `${home}${sep}${sec.replaceAll("/", sep)}${sep}security${sep}`
+  );
 }
 
 /** Where Java runtimes are installed, per OS. */
@@ -1085,7 +1201,9 @@ export async function hostKeystores(
   run: Run,
   p: Platform,
   roots: string[],
+  fs: Fs = LOCAL_FS,
 ): Promise<KeystoreRef[]> {
+  const sep = fs.sep;
   const homes: string[] = [];
   const java = await run("java", ["-XshowSettings:properties", "-version"]);
   const reported = `${java.stdout}\n${java.stderr}`.match(
@@ -1097,21 +1215,37 @@ export async function hostKeystores(
   const nested = (d: string) =>
     p.os === "darwin"
       ? [`${d}/Contents/Home`, `${d}/Contents/jbr/Contents/Home`]
-      : [`${d}${SEP}jbr`, `${d}${SEP}jre`];
+      : [`${d}${sep}jbr`, `${d}${sep}jre`];
   for (const root of roots) {
-    for (const d of await subdirs(root)) {
+    const tree = byParent(await fs.dirs(root, 2), sep);
+    for (const d of tree.get(root) ?? []) {
       homes.push(d, ...nested(d));
-      for (const dd of await subdirs(d)) homes.push(dd, ...nested(dd));
+      for (const dd of tree.get(d) ?? []) homes.push(dd, ...nested(dd));
     }
   }
+  // One lookup for every candidate, which over SSH is one round trip.
+  const unique = [...new Set(homes)];
+  const candidates = unique.flatMap((h) =>
+    javaSecurityDirs(h, sep).map((dir) => `${dir}cacerts`)
+  );
+  const found = await fs.existing(candidates, "file");
   const out: KeystoreRef[] = [];
-  for (const home of new Set(homes)) {
-    const ks = await javaHomeKeystore(home);
-    if (ks) out.push(ks);
+  for (const home of unique) {
+    const dir = javaSecurityDirs(home, sep).find((d) =>
+      found.has(`${d}cacerts`)
+    );
+    if (dir) {
+      out.push({
+        path: `${dir}cacerts`,
+        source: "java",
+        blocked: `${dir}blocked.certs`,
+      });
+    }
   }
   if (p.os === "linux") {
+    const linux = await fs.existing(LINUX_KEYSTORES, "file");
     for (const path of LINUX_KEYSTORES) {
-      if (await exists(path)) out.push({ path, source: "java" });
+      if (linux.has(path)) out.push({ path, source: "java" });
     }
   }
   return out;
@@ -1251,7 +1385,7 @@ function bundleFix(
       if (LINUX_KEYSTORES.includes(b.path)) break;
       return `${where}update this Java runtime to one with the fix (27.0.1.0.2, 25.0.5.0.2, 21.0.13.0.2, 17.0.21.0.2, 11.0.33.0.2 or 8u511 on the page), or replace its lib/security/blocked.certs (blacklisted.certs on JDK 8) with https://ops.java/unix/blocked.certs (windows/blocked.certs on Windows), keeping any entries of your own`;
   }
-  if (kind !== "host") {
+  if (kind === "image" || kind === "container") {
     return `${where}rebuild the image on a base with patched ca-certificates (${
       distroFix(release)
     })`;
@@ -1293,6 +1427,7 @@ export function assess(
   toolchains: Toolchain[],
   release: Record<string, string> = {},
   notes: string[] = [],
+  dependencies: Dependency[] = [],
 ): Target {
   const findings: string[] = [...notes];
   const remediation: string[] = [];
@@ -1361,6 +1496,15 @@ export function assess(
     );
     remediation.push(toolchainFix(t));
   }
+  for (const d of dependencies.filter((d) => d.status === "outdated")) {
+    exposed.tls = true;
+    findings.push(
+      `${d.lockfile} pins ${d.package} ${d.version}, which predates the fix (${
+        d.fixedIn.join(", ") || d.note || "no release yet"
+      })`,
+    );
+    remediation.push(dependencyFix(d));
+  }
   const checked = bundles.length > 0 ||
     native.some((n) => n.verdict !== "error");
   const status = (u: Usage): Status =>
@@ -1380,6 +1524,7 @@ export function assess(
     bundles,
     native,
     toolchains,
+    dependencies,
     findings,
     remediation: [...new Set(remediation)],
     checkedAt: new Date().toISOString(),
@@ -1392,25 +1537,33 @@ export function assess(
  */
 async function readHostBundles(
   list: { path: string; source: string }[],
+  fs: Fs,
 ): Promise<{ bundles: Bundle[]; unreadable: string[] }> {
   const seen = new Set<string>();
   const out: Bundle[] = [];
   const unreadable: string[] = [];
   for (const { path, source } of list) {
-    let real: string;
-    let text: string;
+    let real: string | null;
+    let bytes: Uint8Array | null = null;
     try {
-      real = await Deno.realPath(path);
-      if (seen.has(real)) continue;
-      text = await Deno.readTextFile(real);
+      real = await fs.realPath(path);
+      if (real !== null && seen.has(real)) continue;
+      if (real !== null) bytes = await fs.read(real);
     } catch (err) {
-      if (err instanceof Deno.errors.NotFound && source !== "extra") continue;
       // A bundle we can't read may still be one that tools use.
       unreadable.push(`Could not read ${path}: ${(err as Error).message}`);
       continue;
     }
+    if (real === null || bytes === null) {
+      if (source === "extra") {
+        unreadable.push(`Could not read ${path}: not found`);
+      }
+      continue;
+    }
     seen.add(real);
-    out.push(await checkBundle(path, source, text));
+    out.push(
+      await checkBundle(path, source, new TextDecoder().decode(bytes)),
+    );
   }
   return { bundles: out, unreadable };
 }
@@ -1422,28 +1575,34 @@ async function readHostBundles(
  */
 export async function readHostKeystores(
   list: KeystoreRef[],
+  fs: Fs = LOCAL_FS,
 ): Promise<{ bundles: Bundle[]; notes: string[] }> {
   const seen = new Set<string>();
   const bundles: Bundle[] = [];
   const notes: string[] = [];
   for (const { path, source, blocked } of list) {
     try {
-      const real = await Deno.realPath(path);
-      if (seen.has(real)) continue;
+      const real = await fs.realPath(path);
+      if (real !== null && seen.has(real)) continue;
+      const bytes = real === null ? null : await fs.read(real);
+      if (real === null || bytes === null) {
+        if (source === "extra") notes.push(`Could not read ${path}: not found`);
+        continue;
+      }
       seen.add(real);
-      const bytes = await Deno.readFile(real);
       let blockedText: string | null = null;
       for (const f of blocked ? blockListPaths(blocked) : []) {
-        try {
-          blockedText = await Deno.readTextFile(f);
+        // The older name, or a runtime without a block list.
+        const b = await fs.read(f).catch(() => null);
+        if (b) {
+          blockedText = new TextDecoder().decode(b);
           break;
-        } catch { /* try the older name, or a runtime without a block list */ }
+        }
       }
       const r = await checkKeystore(path, source, bytes, blockedText);
       bundles.push(r.bundle);
       notes.push(...r.notes);
     } catch (err) {
-      if (err instanceof Deno.errors.NotFound && source !== "extra") continue;
       notes.push(`Could not read ${path}: ${(err as Error).message}`);
     }
   }
@@ -1454,6 +1613,7 @@ export async function readHostKeystores(
 async function hostRelease(
   run: Run,
   p: Platform,
+  fs: Fs,
 ): Promise<{ distro: string | null; release: Record<string, string> }> {
   if (p.os === "darwin") {
     const r = await run("sw_vers", ["-productVersion"]);
@@ -1464,62 +1624,170 @@ async function hostRelease(
   }
   if (p.os === "windows") return { distro: "Windows", release: {} };
   for (const f of ["/etc/os-release", "/usr/lib/os-release"]) {
-    try {
-      const release = parseOsRelease(await Deno.readTextFile(f));
-      return { distro: release.PRETTY_NAME ?? release.ID ?? null, release };
-    } catch { /* try the next */ }
+    const bytes = await fs.read(f).catch(() => null);
+    if (bytes === null) continue;
+    const release = parseOsRelease(new TextDecoder().decode(bytes));
+    return { distro: release.PRETTY_NAME ?? release.ID ?? null, release };
   }
   return { distro: null, release: {} };
 }
 
-async function scanHost(
-  g: GlobalArgs,
-  run: Run,
-  p: Platform,
-  deno: DenoRuntime,
-): Promise<Target> {
-  const dir = await Deno.makeTempDir({ prefix: "emudhra-" });
+/** A machine whose host scan runs locally or over SSH. */
+interface Machine {
+  target: string;
+  kind: "host" | "ssh";
+  run: Run;
+  platform: Platform;
+  fs: Fs;
+  /** swamp's own Deno, on the machine swamp runs on. */
+  deno?: DenoRuntime;
+}
+
+async function scanHost(g: GlobalArgs, m: Machine): Promise<Target> {
+  const { run, platform: p, fs } = m;
+  const dir = await fs.tempDir();
   try {
-    const { distro, release } = await hostRelease(run, p);
+    const { distro, release } = await hostRelease(run, p, fs);
     const list = hostBundles(p, g.bundles);
     const keystores: KeystoreRef[] = [];
     let toolchains: Toolchain[] = [];
     if (g.toolchains) {
       list.push(...await pythonBundles(run, p), ...await perlBundles(run));
-      keystores.push(...await hostKeystores(run, p, javaRoots(p)));
+      keystores.push(...await hostKeystores(run, p, javaRoots(p), fs));
       toolchains = [
         ...await toolchainVersions(run),
-        swampDeno(deno),
-        ...await electronApps(appRoots(p), p.os),
+        ...(m.deno ? [swampDeno(m.deno)] : []),
+        ...await electronApps(appRoots(p), p.os, undefined, fs),
       ];
-      if (!toolchains.some((t) => t.tool === "docker-desktop")) {
+      if (
+        m.kind === "host" &&
+        !toolchains.some((t) => t.tool === "docker-desktop")
+      ) {
         const dd = await dockerDesktopInstalled(p);
         if (dd) toolchains.push(dd);
       }
+      if (!toolchains.some((t) => t.tool === "cloudflare-warp")) {
+        const warp = await warpInstalled(run, p, fs);
+        if (warp) toolchains.push(warp);
+      }
     }
     for (const path of g.keystores) keystores.push({ path, source: "extra" });
-    const pem = await readHostBundles(list);
-    const java = await readHostKeystores(keystores);
+    const pem = await readHostBundles(list, fs);
+    const java = await readHostKeystores(keystores, fs);
+    const locks = await lockfileDependencies(fs, g.searchPaths);
     const bundles = [
       ...await applyGitBackends(run, pem.bundles),
       ...java.bundles,
     ];
-    const unreadable = [...pem.unreadable, ...java.notes];
+    const unreadable = [...pem.unreadable, ...java.notes, ...locks.notes];
     const native = p.os === "darwin"
-      ? await macNative(run, dir)
+      ? await macNative(run, dir, fs)
       : p.os === "windows"
       ? await windowsNative(run, dir)
       : [];
     return assess(
-      { target: "host", kind: "host", os: p.os, distro },
+      { target: m.target, kind: m.kind, os: p.os, distro },
       bundles,
       native,
       toolchains,
       release,
       unreadable,
+      locks.dependencies,
     );
   } finally {
-    await Deno.remove(dir, { recursive: true }).catch(() => {});
+    await fs.remove(dir);
+  }
+}
+
+/**
+ * The ssh arguments for a scan: the caller's first, since ssh keeps the
+ * first value it sees for each setting; no prompts; and, where ssh can
+ * multiplex (not Windows' OpenSSH), one shared connection.
+ */
+export function sshArgs(g: GlobalArgs, controlDir: string | null): string[] {
+  return [
+    ...g.sshOptions,
+    "-o",
+    "BatchMode=yes",
+    "-o",
+    "ConnectTimeout=15",
+    ...(g.sshKey ? ["-i", g.sshKey, "-o", "IdentitiesOnly=yes"] : []),
+    ...(controlDir
+      ? [
+        "-o",
+        "ControlMaster=auto",
+        "-o",
+        `ControlPath=${controlDir}/%C`,
+        "-o",
+        "ControlPersist=60",
+      ]
+      : []),
+  ];
+}
+
+/** Which OS `uname -s` names, for the machines a remote scan supports. */
+function remoteOs(uname: string): string | null {
+  return uname === "Linux" ? "linux" : uname === "Darwin" ? "darwin" : null;
+}
+
+/**
+ * Scans a Linux or macOS machine over SSH the way the host is scanned: the
+ * same files, read with POSIX tools, and the same commands, run there.
+ */
+async function scanSsh(
+  g: GlobalArgs,
+  run: Run,
+  dest: string,
+): Promise<Target> {
+  // A short path: a socket path can't be much over 100 bytes.
+  const control = Deno.build.os === "windows"
+    ? null
+    : await Deno.makeTempDir({ dir: "/tmp", prefix: "emudhra-ssh-" });
+  const remote = sshRunner(run, dest, sshArgs(g, control));
+  try {
+    const r = await remote("sh", [
+      "-c",
+      'uname -s; printf "%s\\n" "$HOME" "$JAVA_HOME"',
+    ]);
+    if (r.code !== 0) {
+      throw new Error(
+        `Could not run a command on ${dest} over SSH: ${
+          r.stderr || `ssh exited ${r.code}`
+        }`,
+      );
+    }
+    const [uname, home, javaHome] = r.stdout.split("\n").map((l) => l.trim());
+    const os = remoteOs(uname);
+    if (!os) {
+      throw new Error(
+        `${dest} runs ${
+          uname || "an unknown OS"
+        }; only Linux and macOS machines can be scanned over SSH`,
+      );
+    }
+    const env: Record<string, string | undefined> = {
+      HOME: home || undefined,
+      JAVA_HOME: javaHome || undefined,
+    };
+    return await scanHost(g, {
+      target: dest,
+      kind: "ssh",
+      run: remote,
+      platform: { os, env: (n) => env[n] },
+      fs: remoteFs(remote),
+    });
+  } finally {
+    if (control) {
+      await run("ssh", [
+        "-o",
+        `ControlPath=${control}/%C`,
+        "-O",
+        "exit",
+        "--",
+        dest,
+      ]);
+      await Deno.remove(control, { recursive: true }).catch(() => {});
+    }
   }
 }
 
@@ -1751,6 +2019,32 @@ async function scanContainer(
   }
 }
 
+/** How many targets are scanned at once. */
+const PARALLEL = 4;
+
+/** Runs tasks with at most `limit` at once, keeping each one's outcome. */
+export async function inParallel<T>(
+  tasks: (() => Promise<T>)[],
+  limit: number,
+): Promise<({ value: T } | { error: Error })[]> {
+  const out: ({ value: T } | { error: Error })[] = new Array(tasks.length);
+  let next = 0;
+  const worker = async () => {
+    while (next < tasks.length) {
+      const n = next++;
+      try {
+        out[n] = { value: await tasks[n]() };
+      } catch (err) {
+        out[n] = { error: err as Error };
+      }
+    }
+  };
+  await Promise.all(
+    Array.from({ length: Math.min(limit, tasks.length) }, worker),
+  );
+  return out;
+}
+
 /** Fails when containers are to be scanned but the runtime doesn't answer. */
 export async function checkRuntime(g: GlobalArgs, run: Run) {
   if (!g.images.length && !g.containers.length) return { pass: true };
@@ -1769,7 +2063,7 @@ export async function checkRuntime(g: GlobalArgs, run: Run) {
 
 export const model = {
   type: "@taylor/emudhra/exposure",
-  version: "2026.10.22.5",
+  version: "2026.10.22.6",
   globalArguments: GlobalArgsSchema,
   upgrades: [
     {
@@ -1820,6 +2114,19 @@ export const model = {
       description: "Relicenses under AGPL-3.0-or-later; no settings changed",
       upgradeAttributes: (old: Record<string, unknown>) => old,
     },
+    {
+      toVersion: "2026.10.22.6",
+      description:
+        "Adds the sshHosts, sshOptions and searchPaths arguments, empty for older instances, and sshKey, unset",
+      upgradeAttributes: (
+        old: Record<string, unknown>,
+      ): Record<string, unknown> => ({
+        sshHosts: [],
+        sshOptions: [],
+        searchPaths: [],
+        ...old,
+      }),
+    },
   ],
   resources: {
     target: {
@@ -1866,7 +2173,22 @@ export const model = {
           jobs.push({
             name: "host",
             label: "host",
-            go: () => scanHost(g, run, p, deno),
+            go: () =>
+              scanHost(g, {
+                target: "host",
+                kind: "host",
+                run,
+                platform: p,
+                fs: args._fs ?? LOCAL_FS,
+                deno,
+              }),
+          });
+        }
+        for (const dest of g.sshHosts) {
+          jobs.push({
+            name: slug("ssh", dest),
+            label: dest,
+            go: () => scanSsh(g, run, dest),
           });
         }
         for (const image of g.images) {
@@ -1884,7 +2206,9 @@ export const model = {
           });
         }
         if (!jobs.length) {
-          throw new Error("Nothing to scan: set host, images or containers");
+          throw new Error(
+            "Nothing to scan: set host, sshHosts, images or containers",
+          );
         }
         // Different references can make the same name ("a:b" and "a-b").
         const used = new Set<string>();
@@ -1902,13 +2226,19 @@ export const model = {
           errors: [] as { target: string; error: string }[],
           checkedAt: "",
         };
-        for (const job of jobs) {
-          context.logger.info("Scanning {target}", { target: job.label });
-          let t: Target;
-          try {
-            t = await job.go();
-          } catch (err) {
-            const error = (err as Error).message;
+        // A fleet takes a while one machine at a time, so targets are
+        // scanned a few at once and recorded in order.
+        const results = await inParallel(
+          jobs.map((job) => () => {
+            context.logger.info("Scanning {target}", { target: job.label });
+            return job.go();
+          }),
+          PARALLEL,
+        );
+        for (const [n, job] of jobs.entries()) {
+          const result = results[n];
+          if ("error" in result) {
+            const error = result.error.message;
             context.logger.warn("Could not scan {target}: {error}", {
               target: job.label,
               error,
@@ -1916,6 +2246,7 @@ export const model = {
             summary.errors.push({ target: job.label, error });
             continue;
           }
+          const t = result.value;
           const log = t.status === "exposed"
             ? context.logger.warn
             : context.logger.info;

@@ -2,7 +2,8 @@
 
 **Find where the leaked eMudhra certificate authority keys can still be used
 against you.** This [swamp](https://swamp.club/) extension checks Linux, macOS
-and Windows machines, container images and running containers for trust in
+and Windows machines (Linux and macOS ones over SSH too), container images,
+running containers and project lockfiles for trust in
 eight eMudhra intermediate certificate authorities (CAs) whose private keys
 are public. The keys were
 [disclosed on 20 October 2026](https://emudhra.we-have-a-problem.com/).
@@ -77,26 +78,31 @@ describes. `scan` reads only; it changes nothing.
 
 ## Behavior
 
-`@taylor/emudhra/exposure` scans the machine swamp runs on and the images and
-containers you list. One `scan` covers every target.
+`@taylor/emudhra/exposure` scans the machine swamp runs on, the Linux and macOS
+machines you list over SSH, and the images and containers you list. One `scan`
+covers every target, four at a time.
 
 | Global argument | Default  | Description                                                           |
 | --------------- | -------- | --------------------------------------------------------------------- |
 | `host`          | `true`   | Scan the machine swamp runs on                                        |
+| `sshHosts`      | `[]`     | Linux and macOS machines to scan over SSH, as ssh destinations, e.g. `["web1", "admin@db1", "ssh://admin@db2:2222"]` |
+| `sshKey`        |          | Private key to log in with; otherwise ssh's own configuration and agent decide |
+| `sshOptions`    | `[]`     | More ssh arguments, which win over the scan's own, e.g. `["-J", "bastion"]` |
 | `images`        | `[]`     | Container images to scan, e.g. `["debian:bookworm"]`                  |
 | `containers`    | `[]`     | Running containers to scan, by name or ID                             |
 | `runtime`       | `docker` | `docker`, or `container` for Apple's container CLI                    |
 | `runtimePath`   |          | Path to the runtime CLI; point it at `podman` to use Podman           |
-| `bundles`       | `[]`     | More PEM CA bundles to check, on the host and in every container      |
-| `keystores`     | `[]`     | More Java keystores (JKS or PKCS#12) to check, on the host and in every container |
-| `toolchains`    | `true`   | On the host, also check Python certifi, pip's bundle, Perl's Mozilla::CA, Java runtimes, Node.js, Go, Deno (swamp's own and any on PATH), Bun, uv, pixi, rustup, mise, Claude Code, Docker Desktop and Electron apps |
+| `bundles`       | `[]`     | More PEM CA bundles to check, on every machine and in every container |
+| `keystores`     | `[]`     | More Java keystores (JKS or PKCS#12) to check, on every machine and in every container |
+| `searchPaths`   | `[]`     | Directories (or lockfiles) to search for lockfiles, on the host and over SSH |
+| `toolchains`    | `true`   | On the host and over SSH, also check Python certifi, pip's bundle, Perl's Mozilla::CA, Java runtimes, Node.js, Go, Deno (swamp's own and any on PATH), Bun, uv, pixi, rustup, mise, Claude Code, Docker Desktop, cloudflared, Cloudflare WARP and Electron apps |
 
 | Method | What it does                                                                                     |
 | ------ | ------------------------------------------------------------------------------------------------ |
 | `scan` | Check every target and record the results. With `failOnExposed=true`, fail when any is exposed |
 
-Each target gets a `target` resource, named `host`, `image-<image>` or
-`container-<name>`:
+Each target gets a `target` resource, named `host`, `ssh-<destination>`,
+`image-<image>` or `container-<name>`:
 
 | Field         | Meaning                                                                                    |
 | ------------- | ------------------------------------------------------------------------------------------ |
@@ -106,11 +112,13 @@ Each target gets a `target` resource, named `host`, `image-<image>` or
 | `bundles`     | Each PEM bundle and Java keystore found: the roots and intermediates it trusts, those its runtime's `blocked.certs` refuses, any other certificates whose keys can be recovered (`recoverable`), and which usages that exposes |
 | `native`      | macOS and Windows: the OS verifier's verdict on each of the 16 certificates                |
 | `toolchains`  | Versions of the tools and Electron apps that carry their own roots, against the patched releases, with where each is installed |
+| `dependencies` | Packages pinned in lockfiles under `searchPaths` that carry their own roots, against the patched releases |
 | `findings`    | What was found, one line each                                                              |
 | `remediation` | What to do about it, from the disclosure page where it says                                |
 
 A `summary` resource lists the targets by status, plus any that couldn't be
-scanned. One target that fails (an image that won't pull) is recorded there and
+scanned. One target that fails (an image that won't pull, a machine that won't
+answer over SSH) is recorded there and
 the scan carries on; the run fails only if every target fails.
 
 ## Usage
@@ -127,10 +135,20 @@ swamp data query 'modelName == "fleet" && name == "host"' --select content
 
 # In CI: fail the run when anything is exposed
 swamp behavior run fleet scan --input failOnExposed=true
+
+# Machines over SSH, and the lockfiles in their checkouts
+swamp behavior create @taylor/emudhra/exposure servers \
+  --global-arg 'host=false' \
+  --global-arg 'sshHosts=["web1", "admin@db1"]' \
+  --global-arg 'searchPaths=["/srv"]'
+swamp behavior run servers scan
+swamp data query 'modelName == "servers" && name == "ssh-web1"' --select content
 ```
 
-To check a fleet of machines, run the behavior on each one (swamp running
-there, or a swamp worker), or point `bundles` at bundles you've collected.
+SSH runs with `BatchMode=yes`, so it never prompts: the machines must already be
+in `known_hosts` and the key must load without a passphrase prompt (from the
+agent, or `sshKey`). Windows machines can't be scanned over SSH; run swamp on
+them instead.
 
 ## How it decides
 
@@ -259,10 +277,14 @@ the patched release on the page counts as TLS exposure:
 | mise           | 2026.10.17                | `mise --version`                                   |
 | Claude Code    | 2.1.303                   | `claude --version`                                 |
 | Docker Desktop | 4.96.2                    | `docker version` while it runs; on Windows, else its `componentsVersion.json` |
+| cloudflared    | 2026.10.2                 | `cloudflared --version`                            |
+| Cloudflare WARP | 2026.8.2115.0            | `warp-cli --version`; on macOS, else the app's version; on Windows, else the `warp-cli.exe` in its install directory |
 
 Node.js and Go have a fix per release line: a version on an older line with no
 fix counts as exposed, and one on a newer line counts as patched. Bun has no
-fixed release, so any Bun counts as exposed.
+fixed release, so any Bun counts as exposed. cloudflared and the WARP client
+aren't on the page; their fixed releases come from
+[Cloudflare's post](https://blog.cloudflare.com/emudhra-certificate-compromise).
 
 **Electron apps.** Electron bundles Chromium's verifier and roots and doesn't
 get Chrome's CRLSet updates, so an app is exposed until it ships on a patched
@@ -283,6 +305,38 @@ verifies with rustls and `webpki-roots`, fixed in Deno 2.9.8 (rustls-webpki
 TLS. `DENO_TLS_CA_STORE=system` doesn't help: rustls then loads the OS roots,
 which still include AAA Certificate Services, but not the OS block lists.
 
+**Lockfiles.** A program built from a lockfile that pins a package with its own
+roots trusts the intermediates until the package is updated and the program
+rebuilt, whatever the machine's store says. The scan searches each of
+`searchPaths` up to eight levels down, skipping `.git`, `node_modules`,
+`target`, `_build`, `.venv`, `venv` and `__pycache__`, and an outdated package
+counts as TLS exposure:
+
+| Lockfile                                        | Package                          | Patched        |
+| ----------------------------------------------- | -------------------------------- | -------------- |
+| `Cargo.lock`                                    | `webpki-roots`, `webpki-root-certs` | 1.0.10      |
+| `Cargo.lock`                                    | `rustls-webpki`                  | 0.103.16       |
+| `mix.lock`, `rebar.lock`                        | `castore`                        | 1.0.22         |
+| `mix.lock`, `rebar.lock`                        | `tls_certificate_check`          | 1.36.0         |
+| `mix.lock`, `rebar.lock`                        | `certifi` (Erlang)               | none yet       |
+| `uv.lock`, `poetry.lock`, `pdm.lock`, `Pipfile.lock` | `certifi`                   | 2026.10.19     |
+| `composer.lock`                                 | `composer/ca-bundle`             | 1.4.16, 1.6.0  |
+
+`rustls-webpki` and `composer/ca-bundle` have a fix per release line, like Go;
+a `rustls-webpki` 0.102 is exposed. A `webpki-roots` 0.26 that only re-exports
+1.x is skipped, since the 1.x entry beside it is the one that counts. The
+`tls_certificate_check` release comes from its changelog (1.36.0 removes
+emSign ECC Root CA - G3); the rest are from the page.
+
+**Over SSH.** A machine named in `sshHosts` gets the host scan, run there: the
+same bundles, keystores, toolchains, Electron apps, lockfiles and (on macOS)
+`security verify-cert`. Files are read with `base64`, directories listed with
+`find`, and each lookup covers every path it needs at once, so a scan is a few
+dozen round trips over one shared connection (`ControlMaster`; not when swamp
+itself runs on Windows, whose OpenSSH can't share one). The commands run in
+ssh's non-interactive shell, so a tool only on an interactive `PATH` (nvm,
+asdf, a profile edit) isn't seen; name its bundles in `bundles`.
+
 **Containers.** The scan copies the bundles, Java keystores and
 `/etc/os-release` out with `docker cp`, so it needs nothing inside the image,
 not even a shell. For an image it creates a container to copy from and removes
@@ -297,9 +351,11 @@ in `bundles` or `keystores`.
 - Clients with roots compiled in that the scan can't read or version: Rust
   programs using `webpki-roots` other than the tools above, and anything
   statically linked. Patched versions are listed on the page.
-- Per-project bundles: Composer's `ca-bundle` (fixed in 1.4.16 and 1.6.0),
-  Elixir's `castore` (1.0.22), Erlang's `certifi` (no fix yet). Name them in
-  `bundles`.
+- Per-project bundles outside `searchPaths`, and any vendored outside a
+  lockfile; name them in `bundles`.
+- Lockfiles inside containers; `searchPaths` applies to the host and SSH
+  machines.
+- Windows machines over SSH.
 - NSS databases, such as `~/.pki/nssdb`, which QtWebEngine browsers use.
 - FreeBSD, NetBSD, OmniOS and Solaris hosts, and Bottlerocket nodes, which
   swamp doesn't run on. A Bottlerocket image gets Bottlerocket's advice.
@@ -360,6 +416,13 @@ in `bundles` or `keystores`.
   Leap 15 and 15.6 are exposed; the RHEL-family images, which carry the
   page's blocklist, are protected, with the no-purpose note.
 
+- 22 October 2026, 2026.10.22.6: an `alpine:3.22` container running sshd,
+  scanned over SSH with a key made for the test: its system bundle trusts
+  emSign ECC Root CA - G3, and a `uv.lock` pinning certifi 2025.8.3 is
+  outdated; once `openjdk21-jre-headless` (and the fixed `ca-certificates`
+  it pulls in) is installed, the bundle and the JRE's `cacerts`, found
+  through `/usr/lib/jvm`, are clean. The scan took about 0.6 seconds.
+
 ## What it runs
 
 ```
@@ -377,11 +440,28 @@ rustup --version
 mise --version
 claude --version
 docker version --format '{{.Server.Platform.Name}}'
+cloudflared --version
+warp-cli --version                 # or, on Windows, <Program Files>\Cloudflare\Cloudflare WARP\warp-cli.exe --version
 <git>\cmd\git.exe -C <git> config --get http.sslBackend    # Windows, per Git install
 <git>\cmd\git.exe -C <git> config --type=bool --get http.schannelUseSSLCAInfo    # when schannel
 java -XshowSettings:properties -version
 security verify-cert -c <cert> -c <cross-signed root> -l -L -p basic -v    # macOS, x16
 powershell.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass -File <script> -Data <json>   # Windows
+
+# ssh: each of the host commands above, and the file access below, as
+ssh [sshOptions] -o BatchMode=yes -o ConnectTimeout=15 [-i sshKey -o IdentitiesOnly=yes] \
+    -o ControlMaster=auto -o ControlPath=/tmp/emudhra-ssh-<id>/%C -o ControlPersist=60 \
+    -- <destination> '<command>' '<args>'...
+ssh -o ControlPath=/tmp/emudhra-ssh-<id>/%C -O exit -- <destination>
+sh -c 'uname -s; printf "%s\n" "$HOME" "$JAVA_HOME"'
+sh -c '... base64 < "$1"' sh <file>                       # read a file
+sh -c '... realpath "$1" || readlink -f "$1"' sh <path>   # resolve links
+sh -c 'find "$1" -mindepth 1 -maxdepth "$2" -type d' sh <root> <depth>
+sh -c 'for f; do [ "$t" "$f" ] && printf ...; done' sh -f|-d <path>...
+sh -c '... wc -c ... [ -x "$f" ] ...' sh <dir>              # files in a directory
+sh -c 'grep -a -o -m 1 -E -e "$2" -- "$1"' sh <file> 'Electron/...'
+sh -c 'find "$@"' sh <searchPaths>... -maxdepth 8 ( -name .git -o ... ) -prune -o -type f ( -name Cargo.lock -o ... ) -print
+mktemp -d; sh -c 'printf %s "$2" > "$1"' sh <file> <pem>; sh -c 'rm -rf -- "$1"' sh <dir>   # macOS security verify-cert
 
 # images (docker; podman via runtimePath)
 docker create --name emudhra-scan-<id> --label emudhra-scan=1 <image> true
@@ -399,7 +479,7 @@ docker inspect <name>                      # or: container inspect <name>
 docker cp -L <name>:<path> <temp file>     # or: container cp <name>:<path> <temp file>
 ```
 
-Everything else is read in place: bundles, keystores and `blocked.certs`,
+On the host, everything else is read in place: bundles, keystores, lockfiles and `blocked.certs`,
 Docker Desktop's `componentsVersion.json` on Windows, and each Electron app's
 main executable, which is streamed in 4 MB chunks to find its version.
 Certificates and the PowerShell script go in a temporary directory
@@ -415,7 +495,8 @@ page's `impacted-intermediates.json`, `roots.json` and `chains/` as fetched on
 21 October 2026, and still match on 22 October. The tests check every embedded
 certificate against the page's SHA-256 and SPKI fingerprints. The patched
 releases come from the page's table and the OpenJDK advisory, as of
-22 October.
+22 October, except cloudflared and WARP (Cloudflare's post) and
+`tls_certificate_check` (its changelog).
 
 ## License
 
