@@ -7,7 +7,14 @@ import {
   type Usage,
 } from "./_lib/indicators.ts";
 import { parseBlockedCerts, readKeystore } from "./_lib/keystore.ts";
-import { hashBundle, hashCertificates, sha256Hex, toPem } from "./_lib/x509.ts";
+import { recoverableScalar } from "./_lib/weakkey.ts";
+import {
+  type CertHashes,
+  hashBundle,
+  hashCertificates,
+  sha256Hex,
+  toPem,
+} from "./_lib/x509.ts";
 
 // Exposure to the eMudhra intermediates whose private keys anyone can
 // recover (https://emudhra.we-have-a-problem.com/, disclosed 2026-10-20).
@@ -15,19 +22,26 @@ import { hashBundle, hashCertificates, sha256Hex, toPem } from "./_lib/x509.ts";
 // running containers named in the arguments, and records for each whether it
 // still trusts those intermediates for TLS or code signing:
 //
-// - PEM CA bundles (the system bundle, Homebrew, Python certifi, pip, Git for
-//   Windows, and any others named) are exposed when they hold a compromised
-//   intermediate or a root it chains to, matched by public key.
+// - PEM CA bundles (the system bundle, Homebrew, MacPorts, Python certifi,
+//   pip, Perl's Mozilla::CA, Git for Windows, and any others named) are
+//   exposed when they hold a compromised intermediate or a root it chains
+//   to, matched by public key. A trusted certificate whose OpenSSL trust
+//   settings reject it for any use doesn't count.
+// - Any EC certificate in a bundle or keystore whose private key is one of
+//   the 255 smallest, as the eMudhra keys were, is also exposed: its key can
+//   be recovered, listed or not.
 // - On macOS and Windows the OS verifier is asked about each intermediate:
 //   `security verify-cert` and CryptoAPI through .NET's X509Chain. Both see
 //   the vendors' block lists, which a PEM bundle never does.
 // - Java keystores (each Java runtime's cacerts, the distribution's Java
 //   store, and any others named) are exposed in the same way, unless the
-//   runtime's blocked.certs lists the intermediate. They are read without
+//   runtime's blocked.certs (blacklisted.certs in older JDKs such as 8) lists the
+//   intermediate, which is how the JDK fix ships. They are read without
 //   keytool, so this works in containers too.
-// - Node.js, Go, Electron apps, and the Deno that swamp itself runs on carry
-//   their own roots or verifier, so their versions are compared with the
-//   patched releases.
+// - Node.js, Go, Bun, uv, pixi, rustup, mise, Claude Code, Docker Desktop,
+//   Electron apps, and the Deno that swamp itself runs on carry their own
+//   roots or verifier, so their versions are compared with the patched
+//   releases.
 //
 // Nothing is changed. Containers are read with `docker cp` or `container cp`;
 // an image gets a container created for the copy and removed after.
@@ -58,7 +72,7 @@ const GlobalArgsSchema = z.object({
     "More Java keystores (JKS or PKCS#12) to check, on the host and in every container",
   ),
   toolchains: z.boolean().default(true).describe(
-    "On the host, also check Python certifi, pip, Java runtimes, Node.js, Go, Deno and Electron apps",
+    "On the host, also check Python certifi, pip, Perl Mozilla::CA, Java runtimes, Node.js, Go, Deno, Bun, uv, pixi, rustup, mise, Claude Code, Docker Desktop and Electron apps",
   ),
 });
 type GlobalArgs = z.infer<typeof GlobalArgsSchema>;
@@ -82,6 +96,11 @@ const BundleSchema = z.object({
   intermediates: z.array(z.string()),
   /** Java keystores: the intermediates the runtime's blocked.certs refuses. */
   blocked: z.array(z.string()).optional(),
+  /**
+   * SHA-256 fingerprints of other EC certificates whose private keys can be
+   * recovered from their public keys; present when there are any.
+   */
+  recoverable: z.array(z.string()).optional(),
   exposes: z.array(z.enum(["tls", "codeSigning"])),
 });
 /** What one PEM bundle or Java keystore trusts. */
@@ -222,19 +241,31 @@ export const LINUX_BUNDLES = [
   "/etc/pki/tls/certs/ca-bundle.crt", // Fedora, RHEL and rebuilds
   "/etc/pki/ca-trust/extracted/pem/tls-ca-bundle.pem",
   "/etc/pki/ca-trust/extracted/pem/objsign-ca-bundle.pem",
+  // With trust settings, which blocklisted roots keep (galadran/we-have-a-problem.com#78).
+  "/etc/pki/ca-trust/extracted/openssl/ca-bundle.trust.crt",
   "/etc/ssl/ca-bundle.pem", // openSUSE, SLES
   "/var/lib/ca-certificates/ca-bundle.pem",
   "/etc/ssl/cert.pem", // Alpine, BSD
 ];
 
-/** The PEM bundles OpenSSL-based tools use on macOS, system and Homebrew. */
+/**
+ * The PEM bundles OpenSSL-based tools use on macOS: the system's, Homebrew's
+ * and MacPorts' (curl-ca-bundle, which its curl, git and OpenSSL use).
+ */
 export const MACOS_BUNDLES = [
   "/etc/ssl/cert.pem",
   "/opt/homebrew/etc/ca-certificates/cert.pem",
   "/usr/local/etc/ca-certificates/cert.pem",
   "/opt/homebrew/etc/openssl@3/cert.pem",
   "/usr/local/etc/openssl@3/cert.pem",
+  "/opt/local/share/curl/curl-ca-bundle.crt",
+  "/opt/local/etc/openssl/cert.pem",
 ];
+
+function macSource(path: string): string {
+  if (path.startsWith("/etc/")) return "system";
+  return path.startsWith("/opt/local/") ? "macports" : "homebrew";
+}
 
 /** The bundles to look for on a host, labelled by where they come from. */
 export function hostBundles(
@@ -244,10 +275,7 @@ export function hostBundles(
   const list: { path: string; source: string }[] = [];
   if (p.os === "darwin") {
     for (const path of MACOS_BUNDLES) {
-      list.push({
-        path,
-        source: path.startsWith("/etc/") ? "system" : "homebrew",
-      });
+      list.push({ path, source: macSource(path) });
     }
   } else if (p.os === "windows") {
     // Git for Windows, installed for everyone or for one user.
@@ -286,25 +314,45 @@ export function bundlePurpose(path: string, source: string): Usage[] {
   return /objsign/.test(path) ? ["codeSigning"] : ["tls"];
 }
 
-/** Matches a bundle's certificates against the indicators by public key. */
+const LISTED_KEYS = new Set(INTERMEDIATES.map((i) => i.spkiSha256));
+
+/**
+ * Certificates other than the listed intermediates whose keys have a
+ * recoverable private scalar, by fingerprint.
+ */
+function recoverable(certs: CertHashes[]): string[] {
+  return certs.filter((c) =>
+    !LISTED_KEYS.has(c.spkiSha256) && recoverableScalar(c.spki) !== null
+  ).map((c) => c.sha256);
+}
+
+/**
+ * Matches a bundle's certificates against the indicators by public key, and
+ * looks for any other key that can be recovered. A bundle that holds such a
+ * key can be abused for everything it verifies.
+ */
 export async function checkBundle(
   path: string,
   source: string,
   text: string,
 ): Promise<Bundle> {
-  const certs = await hashBundle(text);
+  const all = await hashBundle(text);
+  const certs = all.filter((c) => !c.rejected);
   const keys = new Set(certs.map((c) => c.spkiSha256));
   const anchors = ANCHORS.filter((a) => keys.has(a.spkiSha256));
   const inters = INTERMEDIATES.filter((i) => keys.has(i.spkiSha256));
+  const weak = recoverable(certs);
+  const purpose = bundlePurpose(path, source);
   return {
     path,
     source,
-    certificates: certs.length,
+    certificates: all.length,
     anchors: anchors.map((a) => a.name),
     intermediates: [...new Set(inters.map((i) => i.name))],
-    exposes: usagesOf([...anchors, ...inters]).filter((u) =>
-      bundlePurpose(path, source).includes(u)
-    ),
+    ...(weak.length ? { recoverable: weak } : {}),
+    exposes: weak.length
+      ? purpose
+      : usagesOf([...anchors, ...inters]).filter((u) => purpose.includes(u)),
   };
 }
 
@@ -356,6 +404,8 @@ export async function checkKeystore(
     anchors.some((a) => REACHES[a.name]?.includes(i.issuedBy))
   );
   const open = reachable.filter((i) => !blocked.has(i.sha256));
+  const weak = recoverable(certs).filter((sha) => !blocked.has(sha));
+  const purpose = bundlePurpose(path, source);
   return {
     bundle: {
       path,
@@ -366,9 +416,10 @@ export async function checkKeystore(
       blocked: INTERMEDIATES.filter((i) => blocked.has(i.sha256)).map(
         copyName,
       ),
-      exposes: usagesOf(open).filter((u) =>
-        bundlePurpose(path, source).includes(u)
-      ),
+      ...(weak.length ? { recoverable: weak } : {}),
+      exposes: weak.length
+        ? purpose
+        : usagesOf(open).filter((u) => purpose.includes(u)),
     },
     notes,
   };
@@ -529,22 +580,28 @@ async function windowsNative(run: Run, dir: string): Promise<NativeResult[]> {
 }
 
 /**
- * Patched releases per line, from the page, and for Deno from its releases.
- * Lines not listed have no fix.
+ * Patched releases per line, from the page's table (fetched 2026-10-22).
+ * Lines not listed have no fix. Each of these carries its own roots, mostly
+ * webpki-roots, or its own verifier, so the OS trust store doesn't cover it.
  */
 export const PATCHED: Record<string, string[]> = {
   node: ["22.23.4", "24.22.1", "26.12.1"],
   go: ["1.26.10", "1.27.3"],
   electron: ["42.11.16", "43.8.1", "44.9.1"],
-  // Deno verifies with rustls and webpki-roots; their fixed releases
-  // (rustls-webpki 0.103.16, webpki-roots 1.0.10) are on Deno's main branch
-  // but in no Deno release.
-  deno: [],
+  // rustls-webpki 0.103.16 and webpki-roots 1.0.10.
+  deno: ["2.9.8"],
+  bun: [],
+  uv: ["0.13.4"],
+  pixi: ["0.82.1"],
+  rustup: ["1.29.2"],
+  mise: ["2026.10.17"],
+  "claude-code": ["2.1.303"],
+  "docker-desktop": ["4.96.2"],
 };
 
 /** Where the fix stands for a tool with no patched release. */
 export const PENDING: Record<string, string> = {
-  deno: "fixed on Deno's main branch (denoland/deno#37046), not yet released",
+  bun: "pending on the page; no Bun release has the fix yet",
 };
 
 function parts(v: string): number[] {
@@ -563,7 +620,8 @@ function compare(a: string, b: string): number {
 /**
  * Whether a version has the fix: at or past the patched release on its
  * line, or on a line newer than every patched one. `lineParts` is how many
- * leading numbers name a line (1 for Node majors, 2 for Go).
+ * leading numbers name a line (1 for Node majors, 2 for Go, 0 for a tool
+ * with a single fixed release).
  */
 export function isPatched(
   version: string,
@@ -579,11 +637,18 @@ export function isPatched(
 }
 
 /** How many leading numbers name a release line, per tool. */
-const LINE_PARTS: Record<string, number> = {
+export const LINE_PARTS: Record<string, number> = {
   node: 1,
   go: 2,
   electron: 1,
-  deno: 2,
+  deno: 0,
+  bun: 0,
+  uv: 0,
+  pixi: 0,
+  rustup: 0,
+  mise: 0,
+  "claude-code": 0,
+  "docker-desktop": 0,
 };
 
 /** One tool's version against its patched releases. */
@@ -604,20 +669,60 @@ export function toolchain(
   };
 }
 
-/** Node.js, Go and Deno versions on PATH, against the patched releases. */
+/** How to ask each tool on PATH for its version. */
+export const PROBES: [keyof typeof PATCHED, string, string[], RegExp][] = [
+  // Deno answers for a `node` that isn't installed, with its own version.
+  ["node", "node", ["--version"], /^v(\d+\.\d+\.\d+)/],
+  ["go", "go", ["version"], /go(\d+\.\d+(?:\.\d+)?)/],
+  ["deno", "deno", ["--version"], /deno (\d+\.\d+\.\d+)/],
+  ["bun", "bun", ["--version"], /^(\d+\.\d+\.\d+)/],
+  ["uv", "uv", ["--version"], /uv (\d+\.\d+\.\d+)/],
+  ["pixi", "pixi", ["--version"], /pixi (\d+\.\d+\.\d+)/],
+  ["rustup", "rustup", ["--version"], /rustup (\d+\.\d+\.\d+)/],
+  ["mise", "mise", ["--version"], /(\d{4}\.\d+\.\d+)/],
+  ["claude-code", "claude", ["--version"], /(\d+\.\d+\.\d+) \(Claude Code\)/],
+  // Answers only while Docker Desktop is running.
+  [
+    "docker-desktop",
+    "docker",
+    ["version", "--format", "{{.Server.Platform.Name}}"],
+    /Docker Desktop (\d+\.\d+\.\d+)/,
+  ],
+];
+
+/** The versions of the tools on PATH, against the patched releases. */
 async function toolchainVersions(run: Run): Promise<Toolchain[]> {
   const out: Toolchain[] = [];
-  const probes: [keyof typeof PATCHED, string[], RegExp][] = [
-    ["node", ["--version"], /v?(\d+\.\d+\.\d+)/],
-    ["go", ["version"], /go(\d+\.\d+(?:\.\d+)?)/],
-    ["deno", ["--version"], /deno (\d+\.\d+\.\d+)/],
-  ];
-  for (const [tool, args, pattern] of probes) {
-    const r = await run(tool, args);
+  for (const [tool, cmd, args, pattern] of PROBES) {
+    const r = await run(cmd, args);
     const v = r.code === 0 ? r.stdout.match(pattern)?.[1] : undefined;
     if (v) out.push(toolchain(tool, v));
   }
   return out;
+}
+
+/**
+ * Docker Desktop on Windows when it isn't running, so `docker version` can't
+ * name it: the installer records the version in componentsVersion.json.
+ */
+export async function dockerDesktopInstalled(
+  p: Platform,
+): Promise<Toolchain | null> {
+  const pf = p.env("ProgramFiles");
+  if (p.os !== "windows" || !pf) return null;
+  const dir = `${pf}${SEP}Docker${SEP}Docker`;
+  try {
+    const v = JSON.parse(
+      await Deno.readTextFile(
+        `${dir}${SEP}resources${SEP}componentsVersion.json`,
+      ),
+    ).appVersion;
+    return typeof v === "string" && /^\d+\.\d+\.\d+$/.test(v)
+      ? toolchain("docker-desktop", v, dir)
+      : null;
+  } catch {
+    return null;
+  }
 }
 
 /** The Deno this code is running on, which is swamp's own under swamp. */
@@ -629,7 +734,7 @@ export function denoRuntime(): DenoRuntime {
  * Swamp is a compiled Deno program, and its fetches verify with Deno's
  * rustls against webpki-roots. DENO_TLS_CA_STORE=system swaps in the OS
  * roots but not the OS block lists, so it doesn't help: only a Deno with
- * the fix does.
+ * the fix (2.9.8) does.
  */
 export function swampDeno(d: DenoRuntime): Toolchain {
   return toolchain("deno", d.version, d.execPath);
@@ -808,6 +913,15 @@ export interface KeystoreRef {
   blocked?: string;
 }
 
+/**
+ * Where a runtime's block list may be: blocked.certs, or blacklisted.certs
+ * beside it in older JDKs such as 8, where the OpenJDK advisory's
+ * workaround puts the new list.
+ */
+export function blockListPaths(blocked: string): string[] {
+  return [blocked, blocked.replace(/blocked\.certs$/, "blacklisted.certs")];
+}
+
 /** The trust store and block list of a Java home, if it has them. */
 async function javaHomeKeystore(
   home: string,
@@ -917,6 +1031,20 @@ async function pythonBundles(
   return [];
 }
 
+/** The bundle Perl's Mozilla::CA ships, which LWP and IO::Socket::SSL use. */
+async function perlBundles(
+  run: Run,
+): Promise<{ path: string; source: string }[]> {
+  const r = await run("perl", [
+    "-MMozilla::CA",
+    "-e",
+    "print Mozilla::CA::SSL_ca_file()",
+  ]);
+  return r.code === 0 && r.stdout
+    ? [{ path: r.stdout, source: "perl mozilla::ca" }]
+    : [];
+}
+
 /** The fields of an os-release file. */
 export function parseOsRelease(text: string): Record<string, string> {
   const out: Record<string, string> = {};
@@ -931,24 +1059,32 @@ export function parseOsRelease(text: string): Record<string, string> {
 export function distroFix(release: Record<string, string>): string {
   const ids = [release.ID, ...(release.ID_LIKE ?? "").split(/\s+/)];
   const has = (...names: string[]) => names.some((n) => ids.includes(n));
+  // Devuan has ID_LIKE=debian and the same packages.
   if (has("ubuntu")) {
-    return "Upgrade ca-certificates to 20260816ubuntu0.<release>.1 (22.04, 24.04, 26.04, 26.10)";
+    return "Upgrade ca-certificates to 20260816ubuntu0.<release>.1 (22.04, 24.04, 26.04, 26.10), or until then prefix mozilla/emSign_ECC_Root_CA_-_G3.crt and mozilla/Comodo_AAA_Services_root.crt with ! in /etc/ca-certificates.conf and run update-ca-certificates";
   }
   if (has("debian")) {
-    return "Upgrade ca-certificates to 20250419~deb12u2 (bookworm), 20250419+deb13u1 (trixie) or 20260816+nmu1";
+    return "Upgrade ca-certificates to 20250419~deb12u2 (bookworm), 20250419+deb13u1 (trixie) or 20260816+nmu1, or until then prefix mozilla/emSign_ECC_Root_CA_-_G3.crt and mozilla/Comodo_AAA_Services_root.crt with ! in /etc/ca-certificates.conf and run update-ca-certificates";
   }
-  if (has("alpine")) return "Upgrade ca-certificates to 20261020-r0";
+  if (has("alpine")) {
+    return "Upgrade ca-certificates to 20261020-r0, or until then prefix mozilla/emSign_ECC_Root_CA_-_G3.crt with ! in /etc/ca-certificates.conf and run update-ca-certificates";
+  }
   if (has("wolfi", "chainguard")) {
     return "Upgrade ca-certificates to 20260909-r3";
   }
   if (has("fedora", "rhel", "centos", "rocky", "almalinux", "amzn")) {
-    return "Upgrade ca-certificates (Fedora 2026.2.92_v9.0.319), or put Comodo_AAA_Services_root.pem and emSign_ECC_Root_CA_-_G3.pem in /etc/pki/ca-trust/source/blocklist and run update-ca-trust";
+    return "Upgrade ca-certificates (Fedora 2026.2.92_v9.0.319), or extract Comodo AAA Services root and emSign ECC Root CA - G3 into /etc/pki/ca-trust/source/blocklist with trust extract, mark each with openssl x509 -trustout -addreject anyExtendedKeyUsage so ca-bundle.trust.crt rejects it for every use, and run update-ca-trust";
   }
   if (has("opensuse", "suse", "sles")) {
-    return "Put Comodo_AAA_Services_root.pem and emSign_ECC_Root_CA_-_G3.pem in /etc/pki/trust/blocklist and run update-ca-certificates";
+    return "Extract Comodo AAA Services root and emSign ECC Root CA - G3 into /etc/pki/trust/blocklist with trust extract and run update-ca-certificates";
   }
-  if (has("arch")) return "Upgrade ca-certificates-mozilla to 3.131.1-1";
+  if (has("arch")) {
+    return "Upgrade ca-certificates-mozilla to 3.131.1-1, or extract emSign ECC Root CA - G3 into /etc/ca-certificates/trust-source/blocklist with trust extract and run update-ca-trust";
+  }
   if (has("gentoo")) return "Upgrade ca-certificates to 20260816.3.125";
+  if (has("bottlerocket")) {
+    return "Bottlerocket has no fixed release yet (bottlerocket-os/bottlerocket#4976); distrust emSign ECC Root CA - G3 with a settings.pki entry with trusted = false";
+  }
   if (has("nixos")) {
     return 'Add "Comodo AAA Services root" and "emSign ECC Root CA - G3" to security.pki.caCertificateBlacklist';
   }
@@ -962,22 +1098,42 @@ function bundleFix(
   release: Record<string, string>,
 ): string {
   const where = `${b.path}: `;
+  const listed = [...b.anchors, ...b.intermediates].join(", ");
+  if (b.recoverable?.length && !listed) {
+    return `${where}remove the certificates whose keys can be recovered (SHA-256 ${
+      b.recoverable.join(", ")
+    })`;
+  }
   switch (b.source) {
     case "homebrew":
-      return `${where}brew upgrade ca-certificates`;
+      return `${where}brew upgrade ca-certificates (2026-09-25_1 or later)`;
+    case "macports":
+      return `${where}MacPorts' curl-ca-bundle has no fixed release yet; remove ${listed} from it as the page shows for /etc/ssl/cert.pem, and sudo port upgrade curl-ca-bundle once it ships the 2026-10-20 curl bundle`;
     case "python certifi":
       return `${where}upgrade certifi to 2026.10.19 or later`;
     case "pip":
+      // The pip of macOS's own python3 lives with the Command Line Tools or
+      // Xcode and can't be upgraded in place.
+      if (
+        /\/Library\/Developer\/CommandLineTools\/|\/Xcode[^/]*\.app\//.test(
+          b.path,
+        )
+      ) {
+        return `${where}this is the pip of macOS's own python3; fix /etc/ssl/cert.pem, then set PIP_CERT=/etc/ssl/cert.pem in its sitecustomize.py (the page's macOS workaround)`;
+      }
       return `${where}upgrade pip to 26.2.2 or later`;
+    case "perl mozilla::ca":
+      return `${where}upgrade Mozilla::CA to 20261020 or later`;
     case "git for windows":
       return `${where}upgrade Git for Windows, or switch http.sslBackend to schannel`;
     case "extra":
       return `${where}remove the certificates listed for it`;
     case "java":
       if (LINUX_KEYSTORES.includes(b.path)) break;
-      return `${where}update this Java runtime when its vendor ships the distrust, or delete ${
-        [...b.anchors, ...b.intermediates].join(", ")
-      } from it with keytool -delete (keytool -list -v shows their aliases)`;
+      return `${where}update this Java runtime to one with the fix (27.0.1.0.2, 25.0.5.0.2, 21.0.13.0.2, 17.0.21.0.2, 11.0.33.0.2 or 8u511 on the page), or replace its lib/security/blocked.certs (blacklisted.certs on JDK 8) with https://ops.java/unix/blocked.certs (windows/blocked.certs on Windows), keeping any entries of your own`;
+  }
+  if (kind === "host" && b.path.endsWith("/ca-bundle.trust.crt")) {
+    return `${where}OpenSSL still trusts ${listed} here when a caller names no purpose, as blocklisted roots are rejected only for named uses; mark each blocklist file with openssl x509 -in F -out F -trustout -addreject anyExtendedKeyUsage and run update-ca-trust, or upgrade ca-certificates`;
   }
   if (kind !== "host") {
     return `${where}rebuild the image on a base with patched ca-certificates (${
@@ -1028,9 +1184,17 @@ export function assess(
   for (const b of bundles) {
     if (!b.exposes.length) continue;
     for (const u of b.exposes) exposed[u] = true;
-    findings.push(
-      `${b.path} trusts ${[...b.anchors, ...b.intermediates].join(", ")}`,
-    );
+    const listed = [...b.anchors, ...b.intermediates];
+    if (listed.length) findings.push(`${b.path} trusts ${listed.join(", ")}`);
+    if (b.recoverable?.length) {
+      findings.push(
+        `${b.path} trusts ${b.recoverable.length} other certificate${
+          b.recoverable.length === 1 ? "" : "s"
+        } whose private key anyone can recover, as with the eMudhra keys (SHA-256 ${
+          b.recoverable.join(", ")
+        })`,
+      );
+    }
     remediation.push(bundleFix(b, base.kind, release));
   }
   const trusted = native.filter((n) => n.verdict === "trusted");
@@ -1042,12 +1206,12 @@ export function assess(
   }
   if (trusted.some((n) => n.verifier === "windows-cryptoapi")) {
     remediation.push(
-      "Windows: let Windows Update refresh the disallowed certificate list (Microsoft blocked these 2026-10-20), or import the trusted intermediates into the Local Machine Disallowed store",
+      "Windows: let the automatic certificate trust list updates bring Microsoft's block (shipped from 2026-10-20); on a machine that doesn't get them, run the page's Block-EmudhraCompromisedCA.ps1 from an elevated PowerShell, which adds the 16 certificates to LocalMachine\\Disallowed",
     );
   }
   if (trusted.some((n) => n.verifier === "macos-security")) {
     remediation.push(
-      "macOS: install the latest security updates; the page lists no manual fix for the system trust store",
+      "macOS: install the latest security updates; Apple has blocked these since 2026-10-19",
     );
   }
   for (const n of native.filter((n) => n.verdict === "error")) {
@@ -1134,10 +1298,11 @@ export async function readHostKeystores(
       seen.add(real);
       const bytes = await Deno.readFile(real);
       let blockedText: string | null = null;
-      if (blocked) {
+      for (const f of blocked ? blockListPaths(blocked) : []) {
         try {
-          blockedText = await Deno.readTextFile(blocked);
-        } catch { /* a runtime without a block list */ }
+          blockedText = await Deno.readTextFile(f);
+          break;
+        } catch { /* try the older name, or a runtime without a block list */ }
       }
       const r = await checkKeystore(path, source, bytes, blockedText);
       bundles.push(r.bundle);
@@ -1185,13 +1350,17 @@ async function scanHost(
     const keystores: KeystoreRef[] = [];
     let toolchains: Toolchain[] = [];
     if (g.toolchains) {
-      list.push(...await pythonBundles(run, p));
+      list.push(...await pythonBundles(run, p), ...await perlBundles(run));
       keystores.push(...await hostKeystores(run, p, javaRoots(p)));
       toolchains = [
         ...await toolchainVersions(run),
         swampDeno(deno),
         ...await electronApps(appRoots(p), p.os),
       ];
+      if (!toolchains.some((t) => t.tool === "docker-desktop")) {
+        const dd = await dockerDesktopInstalled(p);
+        if (dd) toolchains.push(dd);
+      }
     }
     for (const path of g.keystores) keystores.push({ path, source: "extra" });
     const pem = await readHostBundles(list);
@@ -1405,16 +1574,18 @@ async function scanContainer(
       const key = await sha256Hex(bytes);
       if (seen.has(key)) continue;
       seen.add(key);
-      const blocked = ks.blocked
-        ? await copyOut(
+      let blocked: string | null = null;
+      for (const f of ks.blocked ? blockListPaths(ks.blocked) : []) {
+        blocked = await copyOut(
           run,
           bin,
           g.runtime,
           id,
-          ks.blocked,
+          f,
           `${dir}/blocked-${n}`,
-        )
-        : null;
+        );
+        if (blocked !== null) break;
+      }
       try {
         const r = await checkKeystore(ks.path, ks.source, bytes, blocked);
         bundles.push(r.bundle);
@@ -1460,7 +1631,7 @@ export async function checkRuntime(g: GlobalArgs, run: Run) {
 
 export const model = {
   type: "@taylor/emudhra/exposure",
-  version: "2026.10.21.3",
+  version: "2026.10.22.2",
   globalArguments: GlobalArgsSchema,
   upgrades: [
     {
@@ -1473,6 +1644,22 @@ export const model = {
         keystores: [],
         ...old,
       }),
+    },
+    {
+      toVersion: "2026.10.22.1",
+      description:
+        "New checks and patched releases; the arguments are unchanged",
+      upgradeAttributes: (
+        old: Record<string, unknown>,
+      ): Record<string, unknown> => old,
+    },
+    {
+      toVersion: "2026.10.22.2",
+      description:
+        "Finds Docker Desktop on Windows when it isn't running; the arguments are unchanged",
+      upgradeAttributes: (
+        old: Record<string, unknown>,
+      ): Record<string, unknown> => old,
     },
   ],
   resources: {
