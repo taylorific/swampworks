@@ -710,10 +710,12 @@ export async function dockerDesktopInstalled(
 ): Promise<Toolchain | null> {
   const pf = p.env("ProgramFiles");
   if (p.os !== "windows" || !pf) return null;
-  const dir = `${pf}\\Docker\\Docker`;
+  const dir = `${pf}${SEP}Docker${SEP}Docker`;
   try {
     const v = JSON.parse(
-      await Deno.readTextFile(`${dir}\\resources\\componentsVersion.json`),
+      await Deno.readTextFile(
+        `${dir}${SEP}resources${SEP}componentsVersion.json`,
+      ),
     ).appVersion;
     return typeof v === "string" && /^\d+\.\d+\.\d+$/.test(v)
       ? toolchain("docker-desktop", v, dir)
