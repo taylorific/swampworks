@@ -6,6 +6,7 @@ import {
 } from "jsr:@std/assert@1.0.19";
 import { createModelTestContext } from "jsr:@swamp-club/swamp-testing@0.20261008.49";
 import {
+  applyGitBackends,
   assess,
   checkBundle,
   checkKeystore,
@@ -14,6 +15,7 @@ import {
   dockerDesktopInstalled,
   electronApps,
   electronVersion,
+  gitBackend,
   hostBundles,
   hostKeystores,
   inspectJavaHome,
@@ -393,6 +395,9 @@ Deno.test("hostBundles looks in the right places per OS", () => {
   assertEquals(hostBundles(win, []), [{
     path: "C:\\Program Files\\Git\\mingw64\\etc\\ssl\\certs\\ca-bundle.crt",
     source: "git for windows",
+  }, {
+    path: "C:\\Program Files\\Git\\mingw64\\etc\\ssl\\cert.pem",
+    source: "git for windows openssl",
   }]);
   const mac = hostBundles({ os: "darwin", env: env({}) }, ["/x.pem"]);
   assertEquals(mac[0], { path: "/etc/ssl/cert.pem", source: "system" });
@@ -404,6 +409,70 @@ Deno.test("hostBundles looks in the right places per OS", () => {
     ),
   );
   assertEquals(mac.at(-1), { path: "/x.pem", source: "extra" });
+});
+
+Deno.test("gitBackend takes the global http.sslBackend over the system one", async () => {
+  const git = "C:\\Program Files\\Git";
+  const fake =
+    (global: string | null, system: string | null, code = 0) =>
+    (cmd: string, args: string[]): Promise<RunResult> => {
+      assertEquals(cmd, `${git}\\cmd\\git.exe`);
+      const v = args[1] === "--global" ? global : system;
+      return Promise.resolve(
+        code !== 0
+          ? { code, stdout: "", stderr: "not found" }
+          : v === null
+          ? { code: 1, stdout: "", stderr: "" }
+          : { code: 0, stdout: `${v}\n`, stderr: "" },
+      );
+    };
+  assertEquals(await gitBackend(fake(null, "schannel"), git), "schannel");
+  assertEquals(await gitBackend(fake("openssl", "schannel"), git), "openssl");
+  assertEquals(await gitBackend(fake("Schannel", null), git), "schannel");
+  assertEquals(await gitBackend(fake(null, null), git), "openssl");
+  assertEquals(await gitBackend(fake(null, null, 127), git), null);
+});
+
+Deno.test("Git's bundle exposes nothing when Git uses schannel; its OpenSSL's cert.pem still does", async () => {
+  const git = "C:\\Program Files\\Git";
+  const pem = toPem(ECC.der);
+  const bundles = [
+    await checkBundle(
+      `${git}\\mingw64\\etc\\ssl\\certs\\ca-bundle.crt`,
+      "git for windows",
+      pem,
+    ),
+    await checkBundle(
+      `${git}\\mingw64\\etc\\ssl\\cert.pem`,
+      "git for windows openssl",
+      pem,
+    ),
+  ];
+  const run = (backend: string) => (): Promise<RunResult> =>
+    Promise.resolve({ code: 0, stdout: backend, stderr: "" });
+  const base = {
+    target: "host",
+    kind: "host" as const,
+    os: "windows",
+    distro: "Windows",
+  };
+
+  const [sc, ssl] = await applyGitBackends(run("schannel"), bundles);
+  assertEquals([sc.gitBackend, sc.exposes], ["schannel", []]);
+  assertEquals([ssl.gitBackend, ssl.exposes], [undefined, ["tls"]]);
+  const t = assess(base, [sc, ssl], [], []);
+  assertEquals(t.tls, "exposed");
+  assertStringIncludes(t.findings[0], "doesn't read this bundle");
+  assertEquals(t.remediation.length, 1);
+  assertStringIncludes(t.remediation[0], "OpenSSL that ships with Git");
+  assertEquals(assess(base, [sc], [], []).tls, "protected");
+
+  const [os] = await applyGitBackends(run("openssl"), bundles);
+  assertEquals([os.gitBackend, os.exposes], ["openssl", ["tls"]]);
+  assertStringIncludes(
+    assess(base, [os], [], []).remediation[0],
+    "http.sslBackend schannel",
+  );
 });
 
 Deno.test("assess rolls findings into TLS and code-signing status", async () => {
