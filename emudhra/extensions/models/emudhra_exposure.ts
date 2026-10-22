@@ -864,12 +864,19 @@ export async function lockfileDependencies(
     if (!dirs.has(p) && !files.has(p)) notes.push(`Search path ${p} not found`);
   }
   const dependencies: Dependency[] = [];
-  const paths = await fs.find(
-    searchPaths.filter((p) => dirs.has(p) || files.has(p)),
-    Object.keys(LOCKFILES),
-    8,
-    PRUNE,
-  );
+  const roots = searchPaths.filter((p) => dirs.has(p) || files.has(p));
+  let paths: string[];
+  try {
+    paths = await fs.find(roots, Object.keys(LOCKFILES), 8, PRUNE);
+  } catch (err) {
+    // A search that times out on a huge tree mustn't read as "no lockfiles".
+    notes.push(
+      `Could not search ${roots.join(", ")} for lockfiles: ${
+        (err as Error).message
+      }`,
+    );
+    return { dependencies, notes };
+  }
   for (const path of paths.sort()) {
     let bytes: Uint8Array | null;
     try {
@@ -1743,7 +1750,21 @@ async function scanSsh(
   const control = Deno.build.os === "windows"
     ? null
     : await Deno.makeTempDir({ dir: "/tmp", prefix: "emudhra-ssh-" });
-  const remote = sshRunner(run, dest, sshArgs(g, control));
+  // ssh exits 255 when the connection fails. A probe would read that as a
+  // missing tool, so once it happens the scan is incomplete and is dropped.
+  let lost: RunResult | null = null;
+  const ssh = sshRunner(run, dest, sshArgs(g, control));
+  const remote: Run = async (cmd, args) => {
+    const r = await ssh(cmd, args);
+    if (r.code === 255) lost ??= r;
+    return r;
+  };
+  const dropped = () =>
+    new Error(
+      `Lost the SSH connection to ${dest} during the scan, so its results are incomplete and weren't recorded: ${
+        lost?.stderr || "ssh exited 255"
+      }`,
+    );
   try {
     const r = await remote("sh", [
       "-c",
@@ -1769,13 +1790,20 @@ async function scanSsh(
       HOME: home || undefined,
       JAVA_HOME: javaHome || undefined,
     };
-    return await scanHost(g, {
-      target: dest,
-      kind: "ssh",
-      run: remote,
-      platform: { os, env: (n) => env[n] },
-      fs: remoteFs(remote),
-    });
+    let t: Target;
+    try {
+      t = await scanHost(g, {
+        target: dest,
+        kind: "ssh",
+        run: remote,
+        platform: { os, env: (n) => env[n] },
+        fs: remoteFs(remote),
+      });
+    } catch (err) {
+      throw lost ? dropped() : err;
+    }
+    if (lost) throw dropped();
+    return t;
   } finally {
     if (control) {
       await run("ssh", [
@@ -2045,6 +2073,22 @@ export async function inParallel<T>(
   return out;
 }
 
+/** Fails when machines are to be scanned over SSH but ssh isn't installed. */
+export async function checkSsh(g: GlobalArgs, run: Run) {
+  if (!g.sshHosts.length) return { pass: true };
+  // ssh -V prints its version to stderr and exits 0.
+  const r = await run("ssh", ["-V"]);
+  if (r.code === 0) return { pass: true };
+  return {
+    pass: false,
+    errors: [
+      `ssh is not available (${
+        r.stderr || `exit ${r.code}`
+      }); install OpenSSH's client to scan sshHosts`,
+    ],
+  };
+}
+
 /** Fails when containers are to be scanned but the runtime doesn't answer. */
 export async function checkRuntime(g: GlobalArgs, run: Run) {
   if (!g.images.length && !g.containers.length) return { pass: true };
@@ -2152,6 +2196,13 @@ export const model = {
       appliesTo: ["scan"],
       execute: (ctx: CheckContext) =>
         checkRuntime(ctx.globalArgs, commandRunner(30000)),
+    },
+    "ssh-available": {
+      description: "ssh is installed when machines are to be scanned over SSH",
+      labels: ["live"],
+      appliesTo: ["scan"],
+      execute: (ctx: CheckContext) =>
+        checkSsh(ctx.globalArgs, commandRunner(30000)),
     },
   },
   methods: {

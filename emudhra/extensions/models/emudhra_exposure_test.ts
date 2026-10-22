@@ -11,6 +11,7 @@ import {
   checkBundle,
   checkKeystore,
   checkRuntime,
+  checkSsh,
   commandRunner,
   dependency,
   distroFix,
@@ -1782,4 +1783,70 @@ Deno.test("the latest upgrade gives older instances empty SSH and search argumen
   assertEquals(upgraded.sshHosts, []);
   assertEquals(upgraded.searchPaths, []);
   assertEquals(model.globalArguments.parse(upgraded).sshKey, undefined);
+});
+
+Deno.test("remoteFs reports a failed listing instead of an empty one", async () => {
+  const fs = remoteFs(() =>
+    Promise.resolve({ code: 255, stdout: "", stderr: "Connection reset" })
+  );
+  await assertRejects(() => fs.dirs("/opt", 2), Error, "Connection reset");
+  await assertRejects(() => fs.existing(["/a"], "file"), Error, "/a");
+  await assertRejects(() => fs.files("/opt/app"), Error, "Could not list");
+  await assertRejects(
+    () => fs.find(["/srv"], ["Cargo.lock"], 8, []),
+    Error,
+    "Could not search /srv",
+  );
+  // A lockfile search that fails is a note, not "no lockfiles".
+  const { dependencies, notes } = await lockfileDependencies(
+    { ...fs, existing: (paths) => Promise.resolve(new Set(paths)) },
+    ["/srv"],
+  );
+  assertEquals(dependencies, []);
+  assertStringIncludes(notes[0], "Could not search /srv for lockfiles");
+});
+
+Deno.test("scan drops an SSH machine whose connection is lost mid-scan", async () => {
+  let calls = 0;
+  const run = (cmd: string, args: string[]) => {
+    if (cmd !== "ssh") return Promise.resolve(missing);
+    if (args.includes("-O")) return Promise.resolve(ok());
+    calls++;
+    // The first call answers; everything after it finds the link down.
+    return Promise.resolve(
+      calls === 1
+        ? ok("Linux\n/home/admin\n")
+        : { code: 255, stdout: "", stderr: "Broken pipe" },
+    );
+  };
+  const { out, error } = await scan(
+    { host: false, sshHosts: ["web1"] },
+    run,
+  );
+  assertStringIncludes(error!.message, "Every scan failed");
+  assertEquals(out["ssh-web1"], undefined, "no partial result is recorded");
+  const e = (out.summary.errors as { error: string }[])[0].error;
+  assertStringIncludes(e, "Lost the SSH connection to web1");
+  assertStringIncludes(e, "Broken pipe");
+});
+
+Deno.test("checkSsh only matters when there are SSH hosts", async () => {
+  const g = model.globalArguments.parse({});
+  assertEquals(
+    await checkSsh(g, () => Promise.resolve(missing)),
+    { pass: true },
+  );
+  const r = await checkSsh(
+    model.globalArguments.parse({ sshHosts: ["web1"] }),
+    () => Promise.resolve(missing),
+  );
+  assertEquals(r.pass, false);
+  assertStringIncludes(r.errors![0], "ssh is not available");
+  assertEquals(
+    (await checkSsh(
+      model.globalArguments.parse({ sshHosts: ["web1"] }),
+      () => Promise.resolve(ok()),
+    )).pass,
+    true,
+  );
 });
