@@ -16,6 +16,14 @@ so **anyone can recover them from the CA certificates themselves**. No breach
 or insider is needed. Six of the intermediates issue TLS certificates (DV, OV
 and EV); two issue code-signing certificates.
 
+Each key is a P-384 key whose private number is a single byte (4, 56, 66, 115,
+155, 156, 230 or 237) instead of a random 384-bit one. The public key is that
+number times the curve's base point, so trying 1, 2, 3, ... up to 255 finds it
+in milliseconds
+([Scott Helme](https://scotthelme.co.uk/eight-bits-of-trust-emudhras-ca-keys-cracked-in-milliseconds/)).
+eMudhra puts it down to a ceremony script that made a second, weak key pair on
+the HSM, and the wrong one was used for the CSRs.
+
 The intermediates chain to roots in the Mozilla, Microsoft, Apple and Chrome
 root programs: each was issued once by an emSign root and once as a Sectigo
 cross-sign under AAA Certificate Services. So until a client stops trusting
@@ -81,7 +89,7 @@ containers you list. One `scan` covers every target.
 | `runtimePath`   |          | Path to the runtime CLI; point it at `podman` to use Podman           |
 | `bundles`       | `[]`     | More PEM CA bundles to check, on the host and in every container      |
 | `keystores`     | `[]`     | More Java keystores (JKS or PKCS#12) to check, on the host and in every container |
-| `toolchains`    | `true`   | On the host, also check Python certifi, pip's bundle, Java runtimes, Node.js, Go, Deno (swamp's own and any on PATH) and Electron apps |
+| `toolchains`    | `true`   | On the host, also check Python certifi, pip's bundle, Perl's Mozilla::CA, Java runtimes, Node.js, Go, Deno (swamp's own and any on PATH), Bun, uv, pixi, rustup, mise, Claude Code, Docker Desktop and Electron apps |
 
 | Method | What it does                                                                                     |
 | ------ | ------------------------------------------------------------------------------------------------ |
@@ -95,9 +103,9 @@ Each target gets a `target` resource, named `host`, `image-<image>` or
 | `status`      | `exposed` if either usage is exposed, `protected`, or `unknown` when nothing could be checked |
 | `tls`         | Exposure for TLS                                                                           |
 | `codeSigning` | Exposure for code signing                                                                  |
-| `bundles`     | Each PEM bundle and Java keystore found: the roots and intermediates it trusts, those its runtime's `blocked.certs` refuses, and which usages that exposes |
+| `bundles`     | Each PEM bundle and Java keystore found: the roots and intermediates it trusts, those its runtime's `blocked.certs` refuses, any other certificates whose keys can be recovered (`recoverable`), and which usages that exposes |
 | `native`      | macOS and Windows: the OS verifier's verdict on each of the 16 certificates                |
-| `toolchains`  | Node.js, Go, Deno and Electron app versions against the patched releases, with where each is installed |
+| `toolchains`  | Versions of the tools and Electron apps that carry their own roots, against the patched releases, with where each is installed |
 | `findings`    | What was found, one line each                                                              |
 | `remediation` | What to do about it, from the disclosure page where it says                                |
 
@@ -146,17 +154,36 @@ use:
 - Linux and containers: `/etc/ssl/certs/ca-certificates.crt`,
   `/etc/pki/tls/certs/ca-bundle.crt`,
   `/etc/pki/ca-trust/extracted/pem/{tls,objsign}-ca-bundle.pem`,
+  `/etc/pki/ca-trust/extracted/openssl/ca-bundle.trust.crt`,
   `/etc/ssl/ca-bundle.pem`, `/var/lib/ca-certificates/ca-bundle.pem` and
   `/etc/ssl/cert.pem`.
-- macOS: `/etc/ssl/cert.pem` and the Homebrew `ca-certificates` and `openssl@3`
-  bundles.
+- macOS: `/etc/ssl/cert.pem`, the Homebrew `ca-certificates` and `openssl@3`
+  bundles, and MacPorts' `curl-ca-bundle` (which its curl, git and OpenSSL
+  use, and which has no fixed release yet).
 - Windows: Git for Windows' bundle.
-- With `toolchains`: Python's `certifi` and the copy pip vendors.
+- With `toolchains`: Python's `certifi`, the copy pip vendors, and Perl's
+  `Mozilla::CA`. The pip of macOS's own `python3` gets the page's `PIP_CERT`
+  workaround rather than an upgrade.
 
 A bundle that holds one of the roots or intermediates is exposed. Distribution
 and toolchain bundles count for TLS, Fedora's `objsign` bundle for code signing,
 and bundles you name in `bundles` for both. A blocklist (`update-ca-trust`,
 `/etc/ca-certificates.conf`) shows up here once it has rebuilt the bundle.
+
+OpenSSL's `TRUSTED CERTIFICATE` blocks carry trust settings. One rejected for
+any use (`-addreject anyExtendedKeyUsage`) doesn't count. One rejected only for
+named uses still does: `update-ca-trust` writes blocklisted roots into
+`ca-bundle.trust.crt` that way, and OpenSSL trusts them when a caller names no
+purpose
+([galadran/we-have-a-problem.com#78](https://github.com/galadran/we-have-a-problem.com/pull/78)).
+The Fedora-family remediation includes the extra `-addreject` step.
+
+**Recoverable keys.** Every bundle and keystore is also checked for the flaw
+itself. For each P-256, P-384 or P-521 certificate, the scan compares its
+public key with 1×G to 255×G. A match means anyone can work out the private
+key, so the bundle is exposed for everything it verifies, whether or not the
+certificate is on the disclosure page. It finds all eight eMudhra keys this
+way, with the private numbers Scott Helme published, and the tests check that.
 
 **macOS.** `security verify-cert` evaluates each of the 16 certificates with
 the Security framework, which applies Apple's block list. `blocked` means Apple
@@ -174,9 +201,15 @@ CRL happened to be reachable.
 **Java keystores.** Java checks TLS servers and signed JARs against its
 runtime's `cacerts`, so a keystore that holds one of the roots or intermediates
 is exposed for every usage they cover. The JDK also refuses any path through a
-certificate whose SHA-256 is in its `lib/security/blocked.certs`, so a usage is
-exposed only while some copy of an intermediate for it is reachable from the
-store and not blocked. No JDK blocks these yet. The scan reads JKS and PKCS#12
+certificate whose SHA-256 is in its `lib/security/blocked.certs`
+(`blacklisted.certs` in older JDKs such as 8), so a usage is exposed only while
+some copy of an intermediate for it is reachable from the store and not
+blocked. The page lists fixed releases (27.0.1.0.2, 25.0.5.0.2, 21.0.13.0.2,
+17.0.21.0.2, 11.0.33.0.2, 8u511), and the
+[OpenJDK advisory](https://openjdk.org/groups/vulnerability/advisories/2026-10-21)'s
+workaround for older ones is to replace that file with an updated one, so the
+scan checks the file, not the version. A JDK packaged by the distribution usually uses the
+distribution's store instead. The scan reads JKS and PKCS#12
 keystores itself, with no `keytool` and no password (Java leaves a trust
 store's certificates unencrypted), so it works in containers too. It looks at:
 
@@ -194,10 +227,26 @@ store's certificates unencrypted), so it works in containers too. It looks at:
   set it) and the distribution's store.
 - Any keystore you name in `keystores`.
 
-**Toolchains.** Node.js carries its own copy of Mozilla's roots, and the page
-lists patched Go releases too. A version older than the fix on its release line
-(Node 22.23.4, 24.22.1, 26.12.1; Go 1.26.10, 1.27.3), or on a line with no fix,
-counts as TLS exposure.
+**Toolchains.** These carry their own roots (mostly `webpki-roots`) or their
+own verifier, so the OS store doesn't cover them. A version on PATH older than
+the patched release on the page counts as TLS exposure:
+
+| Tool           | Patched                   | Asked with                                         |
+| -------------- | ------------------------- | -------------------------------------------------- |
+| Node.js        | 22.23.4, 24.22.1, 26.12.1 | `node --version`                                   |
+| Go             | 1.26.10, 1.27.3           | `go version`                                       |
+| Deno           | 2.9.8                     | `deno --version`                                   |
+| Bun            | none yet                  | `bun --version`                                    |
+| uv             | 0.13.4                    | `uv --version`                                     |
+| pixi           | 0.82.1                    | `pixi --version`                                   |
+| rustup         | 1.29.2                    | `rustup --version`                                 |
+| mise           | 2026.10.17                | `mise --version`                                   |
+| Claude Code    | 2.1.303                   | `claude --version`                                 |
+| Docker Desktop | 4.96.2                    | `docker version` (only while Docker Desktop runs)  |
+
+Node.js and Go have a fix per release line: a version on an older line with no
+fix counts as exposed, and one on a newer line counts as patched. Bun has no
+fixed release, so any Bun counts as exposed.
 
 **Electron apps.** Electron bundles Chromium's verifier and roots and doesn't
 get Chrome's CRLSet updates, so an app is exposed until it ships on a patched
@@ -213,12 +262,10 @@ builds into its user agent.
 
 **Deno and swamp.** Swamp is a compiled Deno program, and the extension runs
 inside it, so it reports swamp's own Deno (and any `deno` on PATH). Deno
-verifies with rustls and `webpki-roots`, whose fixed releases (rustls-webpki
-0.103.16, webpki-roots 1.0.10) are on Deno's main branch
-([denoland/deno#37046](https://github.com/denoland/deno/pull/37046)) but in no
-Deno release yet, so every Deno counts as exposed for TLS.
-`DENO_TLS_CA_STORE=system` doesn't help: rustls then loads the OS roots, which
-still include AAA Certificate Services, but not the OS block lists.
+verifies with rustls and `webpki-roots`, fixed in Deno 2.9.8 (rustls-webpki
+0.103.16, webpki-roots 1.0.10). A swamp built on an older Deno is exposed for
+TLS. `DENO_TLS_CA_STORE=system` doesn't help: rustls then loads the OS roots,
+which still include AAA Certificate Services, but not the OS block lists.
 
 **Containers.** The scan copies the bundles, Java keystores and
 `/etc/os-release` out with `docker cp`, so it needs nothing inside the image,
@@ -232,8 +279,14 @@ in `bundles` or `keystores`.
 ## Not covered
 
 - Clients with roots compiled in that the scan can't read or version: Rust
-  programs using `webpki-roots` other than Deno, Bun, uv, and anything
+  programs using `webpki-roots` other than the tools above, and anything
   statically linked. Patched versions are listed on the page.
+- Per-project bundles: Composer's `ca-bundle` (fixed in 1.4.16 and 1.6.0),
+  Elixir's `castore` (1.0.22), Erlang's `certifi` (no fix yet). Name them in
+  `bundles`.
+- NSS databases, such as `~/.pki/nssdb`, which QtWebEngine browsers use.
+- FreeBSD, NetBSD, OmniOS and Solaris hosts, and Bottlerocket nodes, which
+  swamp doesn't run on. A Bottlerocket image gets Bottlerocket's advice.
 - Electron apps outside the install roots above (portable apps, Snap and
   Flatpak), and Java runtimes deeper than two levels under them; name their
   keystores in `keystores`.
@@ -264,15 +317,30 @@ in `bundles` or `keystores`.
   (found through `JAVA_HOME`) trusts emSign ECC Root CA - G3, so it is exposed
   for TLS.
 
+- macOS 27 host, 22 October 2026 (swamp 20261022.021804.0, Deno 2.9.8):
+  `/etc/ssl/cert.pem` clean after the page's workaround, the Command Line
+  Tools pip bundle and seven JetBrains runtimes exposed, Docker Desktop 4.90.0
+  and ten Electron apps outdated, Claude Code 2.1.308 and swamp's Deno
+  patched. The whole host scan, including the recoverable-key check, took
+  0.4 seconds.
+
 ## What it runs
 
 ```
 # host
 sw_vers -productVersion                                  # macOS
 python3 -c '<print certifi.where() and pip._vendor.certifi.where()>'
+perl -MMozilla::CA -e 'print Mozilla::CA::SSL_ca_file()'
 node --version
 go version
 deno --version
+bun --version
+uv --version
+pixi --version
+rustup --version
+mise --version
+claude --version
+docker version --format '{{.Server.Platform.Name}}'
 java -XshowSettings:properties -version
 security verify-cert -c <cert> -c <cross-signed root> -l -L -p basic -v    # macOS, x16
 powershell.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass -File <script> -Data <json>   # Windows
@@ -305,8 +373,10 @@ Windows Update; an image that isn't local gets pulled).
 The 16 intermediates, four roots, and the cross-signed emSign Root TLS CA - G3
 are embedded in `extensions/models/_lib/indicators.ts`. They come from the
 page's `impacted-intermediates.json`, `roots.json` and `chains/` as fetched on
-21 October 2026. The tests check every embedded certificate against the page's
-SHA-256 and SPKI fingerprints.
+21 October 2026, and still match on 22 October. The tests check every embedded
+certificate against the page's SHA-256 and SPKI fingerprints. The patched
+releases come from the page's table and the OpenJDK advisory, as of
+22 October.
 
 ## License
 

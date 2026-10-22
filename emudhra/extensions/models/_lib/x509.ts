@@ -1,7 +1,8 @@
 // Just enough X.509 to match certificates by key: split PEM bundles, find the
 // SubjectPublicKeyInfo in a DER certificate, and hash it. Matching on the
 // key rather than the whole certificate catches every copy of a CA, whoever
-// signed it.
+// signed it. Also the trust settings OpenSSL appends to a TRUSTED
+// CERTIFICATE, enough to tell when one is rejected for every use.
 
 /** The bounds of one DER element. */
 export interface Tlv {
@@ -95,10 +96,58 @@ export function splitPem(text: string): Uint8Array[] {
   return out;
 }
 
+/** anyExtendedKeyUsage (2.5.29.37.0), DER-encoded with its tag. */
+const ANY_EKU = [0x06, 0x04, 0x55, 0x1d, 0x25, 0x00];
+
+/**
+ * Whether a trusted certificate's settings reject it for any use, as
+ * `openssl x509 -trustout -addreject anyExtendedKeyUsage` writes them. They
+ * follow the certificate as X509_CERT_AUX, whose [0] holds the rejected
+ * purposes. One rejected only for named purposes, as update-ca-trust writes
+ * blocklisted roots into ca-bundle.trust.crt, is still trusted by OpenSSL
+ * when the caller asks for no purpose.
+ */
+export function rejectsAnyUse(der: Uint8Array): boolean {
+  try {
+    return auxRejectsAny(der);
+  } catch {
+    // Damaged trust settings reject nothing.
+    return false;
+  }
+}
+
+function auxRejectsAny(der: Uint8Array): boolean {
+  const cert = readTlv(der, 0);
+  if (cert.end >= der.length) return false;
+  const aux = readTlv(der, cert.end);
+  if (aux.tag !== 0x30) return false;
+  for (let at = aux.body; at < aux.end;) {
+    const e = readTlv(der, at);
+    if (e.tag === 0xa0) {
+      for (let o = e.body; o < e.end;) {
+        const oid = readTlv(der, o);
+        const bytes = der.subarray(oid.start, oid.end);
+        if (
+          bytes.length === ANY_EKU.length &&
+          bytes.every((b, i) => b === ANY_EKU[i])
+        ) {
+          return true;
+        }
+        o = oid.end;
+      }
+    }
+    at = e.end;
+  }
+  return false;
+}
+
 /** One certificate from a bundle, by its hashes. */
 export interface CertHashes {
   sha256: string;
   spkiSha256: string;
+  spki: Uint8Array;
+  /** A trusted certificate rejected for any use: the bundle doesn't trust it. */
+  rejected: boolean;
 }
 
 /** The certificate and key hashes of every certificate in a PEM bundle. */
@@ -113,9 +162,12 @@ export async function hashCertificates(
   const out: CertHashes[] = [];
   for (const der of ders) {
     try {
+      const spki = spkiBytes(der);
       out.push({
         sha256: await sha256Hex(certificateBytes(der)),
-        spkiSha256: await sha256Hex(spkiBytes(der)),
+        spkiSha256: await sha256Hex(spki),
+        spki,
+        rejected: rejectsAnyUse(der),
       });
     } catch {
       // Not a certificate we can read; it can't be one of ours.

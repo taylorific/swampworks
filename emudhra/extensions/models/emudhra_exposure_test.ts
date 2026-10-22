@@ -17,10 +17,13 @@ import {
   hostKeystores,
   inspectJavaHome,
   isPatched,
+  LINE_PARTS,
   macVerdict,
   model,
   parseOsRelease,
+  PATCHED,
   type Platform,
+  PROBES,
   readHostKeystores,
   type RunResult,
   slug,
@@ -34,6 +37,7 @@ import {
   INTERMEDIATES,
 } from "./_lib/indicators.ts";
 import { parseBlockedCerts, readKeystore } from "./_lib/keystore.ts";
+import { recoverableScalar } from "./_lib/weakkey.ts";
 import {
   certificateBytes,
   fromBase64,
@@ -144,6 +148,122 @@ Deno.test("checkBundle leaves a clean bundle clean and skips garbage", async () 
   assertEquals(b.exposes, []);
 });
 
+/**
+ * A self-signed P-384 CA whose private key is 7, made the way the eMudhra
+ * keys were. Its key appears on no list.
+ */
+const WEAK = `-----BEGIN CERTIFICATE-----
+MIIBwTCCAUagAwIBAgIUXMIYtLK1LRH9Wng1D0wfw12bRuwwCgYIKoZIzj0EAwIw
+FzEVMBMGA1UEAwwMd2VhayB0ZXN0IENBMB4XDTI2MTAyMjEyNDEzOFoXDTM2MTAx
+OTEyNDEzOFowFzEVMBMGA1UEAwwMd2VhayB0ZXN0IENBMHYwEAYHKoZIzj0CAQYF
+K4EEACIDYgAEKDwdc2XOR4jyn46/I07f/q1v6Zf76l/6LVjMnfp7HFCLBVJvVbnr
+sgQPBbSPttDhlHXJkGHkG4i6Uu/bjBaQRxph2GfteZcp2cks0B29IlYw2E7eMqeP
+nmRmTNrFEu+Mo1MwUTAdBgNVHQ4EFgQUDf3tyo69YqLYmSinglJNTsS7wBQwHwYD
+VR0jBBgwFoAUDf3tyo69YqLYmSinglJNTsS7wBQwDwYDVR0TAQH/BAUwAwEB/zAK
+BggqhkjOPQQDAgNpADBmAjEAvF/I/E5Nbazz+CBOd8nVU2ZuE9Kbz1x3qaDLyuzp
+0vfd98iGryvW4laZCWSBPNQyAjEAsJVrYAyyGzOH4Z3XWruyJXQSTqz3DSFdGAHU
+8jNHwiEJR8efUCDebLydNdZFrlPM
+-----END CERTIFICATE-----
+`;
+const WEAK_SHA256 =
+  "A64FB3341668542E4F14009D3FEAB6CD05520FC5D8319D185C47F3BF939974C5";
+
+Deno.test("each intermediate's private key is the single byte Scott Helme recovered", () => {
+  // https://scotthelme.co.uk/eight-bits-of-trust-emudhras-ca-keys-cracked-in-milliseconds/
+  const d: Record<string, number> = {
+    "EM DV TLS CA - G3B": 156,
+    "EM DV TLS CA - G3C": 230,
+    "EM EV TLS CA - G3B": 115,
+    "EM EV TLS CA - G3C": 56,
+    "EM OV TLS CA - G3B": 155,
+    "EM OV TLS CA - G3C": 4,
+    "EM OV CS CA - G3B": 66,
+    "EM OV CS CA - G3C": 237,
+  };
+  for (const i of INTERMEDIATES) {
+    assertEquals(recoverableScalar(spkiBytes(fromBase64(i.der))), d[i.name]);
+  }
+  for (const a of ANCHORS) {
+    assertEquals(recoverableScalar(spkiBytes(fromBase64(a.der))), null);
+  }
+  assertEquals(recoverableScalar(spkiBytes(derOf(UNRELATED))), null);
+  assertEquals(recoverableScalar(spkiBytes(derOf(WEAK))), 7);
+  assertEquals(recoverableScalar(new Uint8Array([0x30, 0x00])), null);
+});
+
+Deno.test("checkBundle flags any other key that can be recovered", async () => {
+  const b = await checkBundle("/b.pem", "system", UNRELATED + WEAK);
+  assertEquals(b.anchors, []);
+  assertEquals(b.recoverable, [WEAK_SHA256]);
+  assertEquals(b.exposes, ["tls"]);
+  const t = assess(
+    { target: "host", kind: "host", os: "linux", distro: null },
+    [b],
+    [],
+    [],
+  );
+  assertEquals(t.tls, "exposed");
+  assertStringIncludes(t.findings[0], "whose private key anyone can recover");
+  assertStringIncludes(t.remediation[0], WEAK_SHA256);
+  // The listed intermediates are reported by name, not again as recoverable.
+  const listed = await checkBundle(
+    "/b.pem",
+    "system",
+    toPem(INTERMEDIATES[0].der),
+  );
+  assertEquals(listed.recoverable, undefined);
+  const ks = await checkKeystore("/k.jks", "extra", jks([derOf(WEAK)]), null);
+  assertEquals(ks.bundle.recoverable, [WEAK_SHA256]);
+  assertEquals(ks.bundle.exposes, ["tls", "codeSigning"]);
+});
+
+/** A TRUSTED CERTIFICATE block rejecting the given purposes (DER OIDs). */
+function trustedPem(der: Uint8Array, rejects: number[][]): string {
+  const oids = rejects.flat();
+  const reject = [0xa0, oids.length, ...oids];
+  const aux = [0x30, reject.length, ...reject];
+  const b64 = btoa(String.fromCharCode(...der, ...aux));
+  return `-----BEGIN TRUSTED CERTIFICATE-----\n${b64}\n-----END TRUSTED CERTIFICATE-----\n`;
+}
+const SERVER_AUTH = [
+  0x06,
+  0x08,
+  0x2b,
+  0x06,
+  0x01,
+  0x05,
+  0x05,
+  0x07,
+  0x03,
+  0x01,
+];
+const ANY_EKU = [0x06, 0x04, 0x55, 0x1d, 0x25, 0x00];
+
+Deno.test("checkBundle honours a rejection for any use, and only that", async () => {
+  const trust = "/etc/pki/ca-trust/extracted/openssl/ca-bundle.trust.crt";
+  const any = await checkBundle(
+    trust,
+    "system",
+    trustedPem(ECC_DER, [ANY_EKU]),
+  );
+  assertEquals([any.certificates, any.anchors, any.exposes], [1, [], []]);
+  const named = await checkBundle(
+    trust,
+    "system",
+    trustedPem(ECC_DER, [SERVER_AUTH]),
+  );
+  assertEquals(named.anchors, ["emSign ECC Root CA - G3"]);
+  assertEquals(named.exposes, ["tls"]);
+  const t = assess(
+    { target: "host", kind: "host", os: "linux", distro: "Fedora" },
+    [named],
+    [],
+    [],
+    { ID: "fedora" },
+  );
+  assertStringIncludes(t.remediation[0], "-addreject anyExtendedKeyUsage");
+});
+
 Deno.test("isPatched compares within a release line", () => {
   const node = ["22.23.4", "24.22.1", "26.12.1"];
   assert(isPatched("22.23.4", node, 1));
@@ -227,6 +347,42 @@ Deno.test("distroFix follows ID_LIKE", () => {
   assertStringIncludes(distroFix({}), "Remove");
 });
 
+Deno.test("distroFix covers Bottlerocket and the any-use rejection on Fedora", () => {
+  assertStringIncludes(distroFix({ ID: "bottlerocket" }), "trusted = false");
+  assertStringIncludes(distroFix({ ID: "fedora" }), "anyExtendedKeyUsage");
+  assertStringIncludes(
+    distroFix(parseOsRelease("ID=devuan\nID_LIKE=debian\n")),
+    "deb13u1",
+  );
+  assertStringIncludes(distroFix({ ID: "arch" }), "trust-source/blocklist");
+});
+
+Deno.test("assess gives MacPorts, macOS's own pip and Perl their own fixes", async () => {
+  const ecc = toPem(ECC.der);
+  const pip =
+    "/Library/Developer/CommandLineTools/Library/Frameworks/Python3.framework/Versions/3.9/lib/python3.9/site-packages/pip/_vendor/certifi/cacert.pem";
+  const bundles = [
+    await checkBundle(
+      "/opt/local/share/curl/curl-ca-bundle.crt",
+      "macports",
+      ecc,
+    ),
+    await checkBundle(pip, "pip", ecc),
+    await checkBundle("/venv/lib/pip/_vendor/certifi/cacert.pem", "pip", ecc),
+    await checkBundle("/perl/Mozilla/CA/cacert.pem", "perl mozilla::ca", ecc),
+  ];
+  const t = assess(
+    { target: "host", kind: "host", os: "darwin", distro: "macOS" },
+    bundles,
+    [],
+    [],
+  );
+  assertStringIncludes(t.remediation[0], "port upgrade curl-ca-bundle");
+  assertStringIncludes(t.remediation[1], "PIP_CERT");
+  assertStringIncludes(t.remediation[2], "upgrade pip to 26.2.2");
+  assertStringIncludes(t.remediation[3], "Mozilla::CA to 20261020");
+});
+
 Deno.test("hostBundles looks in the right places per OS", () => {
   const env = (vars: Record<string, string>) => (k: string) => vars[k];
   const win: Platform = {
@@ -240,6 +396,12 @@ Deno.test("hostBundles looks in the right places per OS", () => {
   const mac = hostBundles({ os: "darwin", env: env({}) }, ["/x.pem"]);
   assertEquals(mac[0], { path: "/etc/ssl/cert.pem", source: "system" });
   assertEquals(mac[1].source, "homebrew");
+  assert(
+    mac.some((b) =>
+      b.path === "/opt/local/share/curl/curl-ca-bundle.crt" &&
+      b.source === "macports"
+    ),
+  );
   assertEquals(mac.at(-1), { path: "/x.pem", source: "extra" });
 });
 
@@ -661,7 +823,7 @@ Deno.test("checkKeystore notes what it couldn't read", async () => {
   assertStringIncludes(r.notes[1], "not SHA-256");
 });
 
-Deno.test("toolchain knows the patched Electron lines and that Deno has no release yet", () => {
+Deno.test("toolchain knows the patched Electron lines and Deno 2.9.8", () => {
   assertEquals(toolchain("electron", "43.6.0").status, "outdated");
   assertEquals(toolchain("electron", "43.8.1").status, "patched");
   assertEquals(toolchain("electron", "38.2.0").status, "outdated");
@@ -672,8 +834,56 @@ Deno.test("toolchain knows the patched Electron lines and that Deno has no relea
   });
   assertEquals(deno.status, "outdated");
   assertEquals(deno.path, "/usr/local/bin/swamp");
-  assertStringIncludes(deno.note!, "denoland/deno#37046");
+  assertEquals(
+    swampDeno({ version: "2.9.8", execPath: "/s" }).status,
+    "patched",
+  );
+  assertEquals(toolchain("deno", "2.10.0").status, "patched");
+  assertEquals(toolchain("deno", "1.46.3").status, "outdated");
   assert(!isPatched("9.9.9", [], 2), "no release has the fix");
+});
+
+Deno.test("toolchain covers the page's other tools, and Bun has no fix yet", () => {
+  assertEquals(toolchain("claude-code", "2.1.308").status, "patched");
+  assertEquals(toolchain("claude-code", "2.1.299").status, "outdated");
+  assertEquals(toolchain("docker-desktop", "4.90.0").status, "outdated");
+  assertEquals(toolchain("uv", "0.13.4").status, "patched");
+  assertEquals(toolchain("uv", "0.9.30").status, "outdated");
+  assertEquals(toolchain("mise", "2026.10.16").status, "outdated");
+  const bun = toolchain("bun", "1.3.5");
+  assertEquals(bun.status, "outdated");
+  assertStringIncludes(bun.note!, "no Bun release");
+  for (const tool of Object.keys(PATCHED)) {
+    assert(tool in LINE_PARTS, `${tool} has no release-line rule`);
+  }
+});
+
+Deno.test("the version probes read each tool's output", () => {
+  const out: Record<string, string> = {
+    node: "v24.22.1",
+    go: "go version go1.27.3 darwin/arm64",
+    deno: "deno 2.9.8 (stable, release, aarch64-apple-darwin)",
+    bun: "1.3.5",
+    uv: "uv 0.13.4 (Homebrew 2026-10-20)",
+    pixi: "pixi 0.82.1",
+    rustup: "rustup 1.29.2 (a1b2c3d 2026-10-20)",
+    mise: "2026.10.17 macos-arm64 (2026-10-17)",
+    "claude-code": "2.1.308 (Claude Code)",
+    "docker-desktop": "Docker Desktop 4.90.0 (238679)",
+  };
+  for (const [tool, , , pattern] of PROBES) {
+    assert(out[tool], `no sample for ${tool}`);
+    assert(pattern.test(out[tool]), tool);
+  }
+  const dd = PROBES.find(([t]) => t === "docker-desktop")!;
+  assertEquals(out["docker-desktop"].match(dd[3])![1], "4.90.0");
+  assertEquals("Docker Engine - Community".match(dd[3]), null);
+  const node = PROBES.find(([t]) => t === "node")!;
+  assertEquals(
+    "deno 2.9.8 (stable, release, aarch64-apple-darwin)".match(node[3]),
+    null,
+    "Deno standing in for a missing node",
+  );
 });
 
 Deno.test("assess explains outdated apps and swamp's Deno", () => {
@@ -793,6 +1003,42 @@ Deno.test("hostKeystores finds Java homes, bundled runtimes and the java on PATH
   }
 });
 
+Deno.test("readHostKeystores reads a JDK 8 blacklisted.certs when there is no blocked.certs", async () => {
+  const dir = await Deno.makeTempDir();
+  try {
+    const sec = `${dir}/jre/lib/security`;
+    await Deno.mkdir(sec, { recursive: true });
+    await Deno.writeFile(`${sec}/cacerts`, jks([AAA_DER]));
+    const ref = {
+      path: `${sec}/cacerts`,
+      source: "java",
+      blocked: `${sec}/blocked.certs`,
+    };
+    const open = await readHostKeystores([ref]);
+    assertEquals(open.bundles[0].exposes, ["tls", "codeSigning"]);
+    assertStringIncludes(
+      assess(
+        { target: "host", kind: "host", os: "linux", distro: null },
+        open.bundles,
+        [],
+        [],
+      ).remediation[0],
+      "https://ops.java/unix/blocked.certs",
+    );
+    const aaa = INTERMEDIATES.filter((i) =>
+      i.issuedBy === "AAA Certificate Services"
+    );
+    await Deno.writeTextFile(
+      `${sec}/blacklisted.certs`,
+      blockedCerts(...aaa.map((i) => i.sha256)),
+    );
+    const fixed = await readHostKeystores([ref]);
+    assertEquals(fixed.bundles[0].exposes, []);
+  } finally {
+    await Deno.remove(dir, { recursive: true });
+  }
+});
+
 Deno.test("inspectJavaHome reads the environment from inspect", () => {
   assertEquals(
     inspectJavaHome(
@@ -894,11 +1140,12 @@ Deno.test("scan checks swamp's own Deno, Java and Electron apps on the host", as
   }
 });
 
-Deno.test("the upgrade gives 2026.10.21.1 instances an empty keystores list", () => {
-  const [up] = model.upgrades;
-  assertEquals(up.toVersion, model.version);
+Deno.test("the upgrades give 2026.10.21.1 instances an empty keystores list and carry on to the current version", () => {
+  const [up, next] = model.upgrades;
+  assertEquals(up.toVersion, "2026.10.21.3");
+  assertEquals(model.upgrades.at(-1)!.toVersion, model.version);
   const old = { host: false, images: ["debian:bookworm"] };
-  const upgraded = up.upgradeAttributes(old);
+  const upgraded = next.upgradeAttributes(up.upgradeAttributes(old));
   assertEquals(upgraded, {
     keystores: [],
     host: false,
