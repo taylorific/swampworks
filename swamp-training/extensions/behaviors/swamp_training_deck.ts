@@ -11,10 +11,12 @@ import { unifiedDiff } from "./_lib/diff.ts";
 import { type Exec, extractLab, type LabStep, runLab } from "./_lib/lab.ts";
 
 // `watch` asks GitHub for swamp's latest release and lists the commits since
-// the release the deck was last tested against. `retest` downloads a release
-// binary (checksum verified) and runs it in a throwaway sandbox (its own HOME,
-// your swamp sign-in through SWAMP_CONFIG_DIR), so the swamp you have
-// installed is never touched. It then checks three things:
+// the release the deck was last tested against. When the installed swamp is a
+// newer build than that release, it is the one watched and tested instead.
+// `retest` downloads a release binary (checksum verified), or copies the
+// installed one, and runs it in a throwaway sandbox (its own HOME, your swamp
+// sign-in through SWAMP_CONFIG_DIR), so the swamp you have installed is never
+// changed. It then checks three things:
 //   commands  every `swamp ...` command in the deck against `swamp help`
 //   lab       the @training/file-check lab, rebuilt from the slides and run
 //   skills    what changed in the skills, CLAUDE.md and allowlist that
@@ -40,6 +42,9 @@ const GlobalArgsSchema = z.object({
   ignore: z.array(z.string()).default([]).describe(
     "Regular expressions for deck commands that aren't real commands, such as a joke",
   ),
+  installedSwamp: z.string().default("swamp").describe(
+    "Installed swamp binary; tested instead of the latest release when it is a newer build. Empty to test releases only",
+  ),
 });
 type GlobalArgs = z.infer<typeof GlobalArgsSchema>;
 
@@ -63,9 +68,14 @@ const CommitSchema = z.object({
 });
 type Commit = z.infer<typeof CommitSchema>;
 
+const SourceSchema = z.enum(["release", "installed"]).describe(
+  "Whether the build is a GitHub release or the newer installed swamp",
+);
+
 const UpstreamSchema = z.object({
   repo: z.string(),
   latest: z.string(),
+  source: SourceSchema,
   publishedAt: z.string(),
   url: z.string(),
   lastTested: z.string().nullable(),
@@ -73,7 +83,7 @@ const UpstreamSchema = z.object({
   commits: z.array(CommitSchema),
   commitsTotal: z.number(),
   commitsTruncated: z.boolean().describe(
-    "True when GitHub listed only the oldest 250 of commitsTotal commits",
+    "True when the list is incomplete: GitHub listed only the oldest 250 of commitsTotal commits, or couldn't compare an installed build",
   ),
   checkedAt: z.string(),
 });
@@ -86,6 +96,7 @@ const CommandProblemSchema = z.object({
 
 const ReportSchema = z.object({
   version: z.string(),
+  source: SourceSchema,
   previousVersion: z.string().nullable(),
   platform: z.string(),
   testedAt: z.string(),
@@ -93,7 +104,7 @@ const ReportSchema = z.object({
   commits: z.array(CommitSchema),
   commitsTotal: z.number(),
   commitsTruncated: z.boolean().describe(
-    "True when GitHub listed only the oldest 250 of commitsTotal commits",
+    "True when the list is incomplete: GitHub listed only the oldest 250 of commitsTotal commits, or couldn't compare an installed build",
   ),
   commands: z.object({
     total: z.number(),
@@ -249,7 +260,7 @@ export async function commitsBetween(
 ): Promise<CommitList> {
   if (base === head) return { commits: [], total: 0, truncated: false };
   const raw = parseOrThrow(
-    await gh(["api", `repos/${repo}/compare/${base}...${head}`]),
+    await gh(["api", `repos/${repo}/compare/${refOf(base)}...${refOf(head)}`]),
     `Comparing ${base}...${head}`,
   );
   const commits = (raw.commits ?? []) as {
@@ -271,6 +282,119 @@ export async function commitsBetween(
 }
 
 const NO_COMMITS: CommitList = { commits: [], total: 0, truncated: false };
+
+/**
+ * commitsBetween, except that when either end is an installed build an
+ * error is logged and the list marked truncated: a local build's commit
+ * may not be on GitHub, and that shouldn't lose a finished retest.
+ */
+export async function commitsSince(
+  gh: Gh,
+  repo: string,
+  base: string,
+  baseInstalled: boolean,
+  target: Target,
+  logger: Logger,
+): Promise<CommitList> {
+  try {
+    return await commitsBetween(gh, repo, base, target.tag);
+  } catch (e) {
+    if (!baseInstalled && target.source !== "installed") throw e;
+    logger.warn("Cannot list the commits from {base} to {head}: {error}", {
+      base,
+      head: target.tag,
+      error: e instanceof Error ? e.message : String(e),
+    });
+    return { commits: [], total: 0, truncated: true };
+  }
+}
+
+/** The git ref for a version: the commit in `...-sha.<commit>`, or the version itself. */
+export function refOf(version: string): string {
+  return version.match(/-sha\.([0-9a-f]+)$/)?.[1] ?? version;
+}
+
+/** Compares two swamp versions (`v20261021.015131.0-sha...`) by build time. */
+export function compareVersions(a: string, b: string): number {
+  const key = (v: string) =>
+    (v.match(/^v?(\d+)\.(\d+)\.(\d+)/)?.slice(1) ?? []).map(Number);
+  const [ka, kb] = [key(a), key(b)];
+  for (let i = 0; i < 3; i++) {
+    const d = (ka[i] ?? 0) - (kb[i] ?? 0);
+    if (d !== 0) return d;
+  }
+  return 0;
+}
+
+/** Reports the version of a swamp binary, or null when it can't run. Injectable for tests. */
+export type SwampVersion = (bin: string) => Promise<string | null>;
+
+/** Asks a swamp binary for its version with `swamp version --json`. */
+export const swampVersion: SwampVersion = async (bin) => {
+  try {
+    // swamp-quality-ignore deno-command: runs only version --json on the installed swamp, see README What it runs
+    const out = await new Deno.Command(bin, {
+      args: ["version", "--json", "--no-telemetry"],
+      stdin: "null",
+      stdout: "piped",
+      stderr: "null",
+      signal: AbortSignal.timeout(60000),
+    }).output();
+    if (out.code !== 0) return null;
+    const v = JSON.parse(new TextDecoder().decode(out.stdout)).version;
+    return typeof v === "string" && TAG.test(v)
+      ? `v${v.replace(/^v/, "")}`
+      : null;
+  } catch {
+    return null;
+  }
+};
+
+/** The build to test: the latest release, or the installed swamp when it is newer. */
+export interface Target extends Release {
+  source: "release" | "installed";
+}
+
+/** Picks the latest release, or the installed swamp when its build is newer. */
+export async function pickTarget(
+  gh: Gh,
+  repo: string,
+  installed: string,
+  version: SwampVersion,
+  logger: Logger,
+): Promise<Target> {
+  const release = await getRelease(gh, repo);
+  const local = installed ? await version(installed) : null;
+  if (installed && !local) {
+    logger.warn("Cannot read the version of {bin}; using releases only", {
+      bin: installed,
+    });
+  }
+  if (!local || compareVersions(local, release.tag) <= 0) {
+    return { ...release, source: "release" };
+  }
+  logger.info("Installed swamp {local} is newer than release {release}", {
+    local,
+    release: release.tag,
+  });
+  return {
+    tag: local,
+    publishedAt: "",
+    url: `https://github.com/${repo}/commit/${refOf(local)}`,
+    source: "installed",
+  };
+}
+
+/** Finds `bin` on PATH, unless it is already a path. */
+export function resolveBin(bin: string): string {
+  if (bin.includes("/")) return bin;
+  for (const dir of (Deno.env.get("PATH") ?? "").split(":")) {
+    try {
+      if (dir && Deno.statSync(`${dir}/${bin}`).isFile) return `${dir}/${bin}`;
+    } catch { /* not in this directory */ }
+  }
+  throw new Error(`Cannot find ${bin} on PATH`);
+}
 
 /** The release asset for this machine. */
 export function assetName(os: string, arch: string): string {
@@ -476,7 +600,7 @@ function defaultConfigDir(): string {
 /** The `@taylor/swamp-training/deck` swamp behavior type. */
 export const behavior = {
   type: "@taylor/swamp-training/deck",
-  version: "2026.10.22.1",
+  version: "2026.10.22.2",
   globalArguments: GlobalArgsSchema,
   upgrades: [
     {
@@ -488,6 +612,15 @@ export const behavior = {
       toVersion: "2026.10.22.1",
       description: "Relicenses under AGPL-3.0-or-later; no settings changed",
       upgradeAttributes: (old: Record<string, unknown>) => old,
+    },
+    {
+      toVersion: "2026.10.22.2",
+      description:
+        "Adds installedSwamp: a newer installed swamp is tested instead of the latest release",
+      upgradeAttributes: (old: Record<string, unknown>) => ({
+        installedSwamp: "swamp",
+        ...old,
+      }),
     },
   ],
   resources: {
@@ -521,7 +654,7 @@ export const behavior = {
         "Check for a swamp release newer than the one the deck was last tested against",
       arguments: z.object({}),
       execute: async (
-        args: { _gh?: Gh },
+        args: { _gh?: Gh; _swampVersion?: SwampVersion },
         context: Context,
       ): Promise<{ dataHandles: { name: string }[] }> => {
         const g = context.globalArgs;
@@ -529,12 +662,25 @@ export const behavior = {
         context.logger.info("Checking {repo} for a new release", {
           repo: g.upstream,
         });
-        const latest = await getRelease(gh, g.upstream);
+        const latest = await pickTarget(
+          gh,
+          g.upstream,
+          g.installedSwamp,
+          args._swampVersion ?? swampVersion,
+          context.logger,
+        );
         const last = await context.readResource("report");
         const lastTested = last ? String(last.version) : null;
         const changed = latest.tag !== lastTested;
         const since = lastTested && changed
-          ? await commitsBetween(gh, g.upstream, lastTested, latest.tag)
+          ? await commitsSince(
+            gh,
+            g.upstream,
+            lastTested,
+            last?.source === "installed",
+            latest,
+            context.logger,
+          )
           : NO_COMMITS;
         if (changed) {
           context.logger.info(
@@ -549,6 +695,7 @@ export const behavior = {
         const handle = await context.writeResource("upstream", "upstream", {
           repo: g.upstream,
           latest: latest.tag,
+          source: latest.source,
           publishedAt: latest.publishedAt,
           url: latest.url,
           lastTested,
@@ -564,15 +711,26 @@ export const behavior = {
 
     retest: {
       description:
-        "Retest the deck against the latest swamp release (or `version`), unless that release was already tested",
+        "Retest the deck against the latest swamp release, the installed swamp when it is newer, or `version`, unless that build was already tested",
       arguments: RetestArgsSchema,
       execute: async (
-        args: RetestArgs & { _gh?: Gh },
+        args: RetestArgs & { _gh?: Gh; _swampVersion?: SwampVersion },
         context: Context,
       ): Promise<{ dataHandles: { name: string }[] }> => {
         const g = context.globalArgs;
         const gh = args._gh ?? ghRunner(g.ghPath);
-        const release = await getRelease(gh, g.upstream, args.version);
+        const release: Target = args.version
+          ? {
+            ...await getRelease(gh, g.upstream, args.version),
+            source: "release",
+          }
+          : await pickTarget(
+            gh,
+            g.upstream,
+            g.installedSwamp,
+            args._swampVersion ?? swampVersion,
+            context.logger,
+          );
         const last = await context.readResource("report");
         const previousVersion = last ? String(last.version) : null;
         if (previousVersion === release.tag && !args.force) {
@@ -593,17 +751,33 @@ export const behavior = {
           await Deno.mkdir(home);
           await Deno.mkdir(repo);
           await Deno.mkdir(`${sandbox}/bin`);
-          context.logger.info("Downloading {asset} {version}", {
-            asset,
-            version: release.tag,
-          });
-          const swamp = await downloadSwamp(
-            gh,
-            g.upstream,
-            release.tag,
-            asset,
-            `${sandbox}/bin`,
-          );
+          let swamp: string;
+          if (release.source === "installed") {
+            // A copy, so updating swamp mid-retest can't swap the binary out
+            const from = resolveBin(g.installedSwamp);
+            context.logger.info(
+              "Copying installed swamp {version} from {from}",
+              {
+                version: release.tag,
+                from,
+              },
+            );
+            swamp = `${sandbox}/bin/swamp`;
+            await Deno.copyFile(from, swamp);
+            await Deno.chmod(swamp, 0o755);
+          } else {
+            context.logger.info("Downloading {asset} {version}", {
+              asset,
+              version: release.tag,
+            });
+            swamp = await downloadSwamp(
+              gh,
+              g.upstream,
+              release.tag,
+              asset,
+              `${sandbox}/bin`,
+            );
+          }
           const exec = sandboxExec(
             home,
             g.swampConfigDir || defaultConfigDir(),
@@ -646,11 +820,19 @@ export const behavior = {
           const skills = compareSnapshots(prevSnap, snap);
 
           const since = previousVersion
-            ? await commitsBetween(gh, g.upstream, previousVersion, release.tag)
+            ? await commitsSince(
+              gh,
+              g.upstream,
+              previousVersion,
+              last?.source === "installed",
+              release,
+              context.logger,
+            )
             : NO_COMMITS;
           const labOk = !labError && steps.every((s) => s.ok);
           const report: Report = {
             version: release.tag,
+            source: release.source,
             previousVersion,
             platform: asset.replace(/^swamp-/, ""),
             testedAt: new Date().toISOString(),

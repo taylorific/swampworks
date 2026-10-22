@@ -3,25 +3,33 @@
 A [swamp](https://swamp.club/) extension that keeps the
 [swamp-training](https://github.com/taylorific/swamp-training) Slidev deck
 honest about swamp. Swamp cuts a release for every merge, often several an hour;
-this checks whether the deck still matches the latest one.
+this checks whether the deck still matches the latest one, or the swamp you have
+installed when that is a newer build than any release.
 
 ## Behavior
 
 `@taylor/swamp-training/deck` points at one deck:
 
-| Global argument  | Default            | Description                                                                  |
-| ---------------- | ------------------ | ---------------------------------------------------------------------------- |
-| `deckDir`        |                    | Deck directory; relative paths resolve from the swamp repo                   |
-| `slidesFile`     | `slides.md`        | Deck markdown file, relative to `deckDir`                                    |
-| `upstream`       | `swamp-club/swamp` | GitHub repository whose releases are watched                                 |
-| `ghPath`         | `gh`               | GitHub CLI binary                                                            |
-| `swampConfigDir` | `~/.config/swamp`  | Swamp config directory holding your sign-in, shared with the sandbox         |
-| `ignore`         | `[]`               | Regular expressions for deck commands that aren't real commands, like a joke |
+| Global argument  | Default            | Description                                                                                      |
+| ---------------- | ------------------ | ------------------------------------------------------------------------------------------------ |
+| `deckDir`        |                    | Deck directory; relative paths resolve from the swamp repo                                       |
+| `slidesFile`     | `slides.md`        | Deck markdown file, relative to `deckDir`                                                        |
+| `upstream`       | `swamp-club/swamp` | GitHub repository whose releases are watched                                                     |
+| `ghPath`         | `gh`               | GitHub CLI binary                                                                                |
+| `swampConfigDir` | `~/.config/swamp`  | Swamp config directory holding your sign-in, shared with the sandbox                             |
+| `ignore`         | `[]`               | Regular expressions for deck commands that aren't real commands, like a joke                     |
+| `installedSwamp` | `swamp`            | Installed swamp binary, tested instead of the latest release when newer; empty for releases only |
 
-| Method   | What it does                                                                                              |
-| -------- | --------------------------------------------------------------------------------------------------------- |
-| `watch`  | Is there a release newer than the last one tested? Lists the commits since then. Downloads nothing        |
-| `retest` | Retest the deck against the latest release (or `version`); does nothing if that release is already tested |
+| Method   | What it does                                                                                          |
+| -------- | ----------------------------------------------------------------------------------------------------- |
+| `watch`  | Is there a build newer than the last one tested? Lists the commits since then. Downloads nothing      |
+| `retest` | Retest the deck against the newest build (or `version`); does nothing if that build is already tested |
+
+The newest build is the latest GitHub release, unless `installedSwamp` reports
+(`swamp version --json`) a newer one. Builds are compared by the timestamp in
+their version, and an installed build's commits are listed from the commit in
+its `-sha.` suffix. `source` in the `upstream` and `report` resources says which
+it was. `retest` with `version` always tests that release.
 
 `retest` takes `version` (a release tag, default the latest), `force` (retest a
 release that was already tested) and `keepSandbox` (keep the sandbox directory
@@ -29,12 +37,12 @@ for debugging; its path goes in the report).
 
 ## What `retest` checks
 
-It downloads the release binary for this machine with `gh release download`,
-checks it against the release's `checksums.txt`, and runs it in a throwaway
-sandbox: a temporary directory with its own `HOME`, so the swamp you have
-installed, its skills and its caches are never touched. Only your sign-in is
-shared, through `SWAMP_CONFIG_DIR`. In the sandbox it runs `swamp repo init`,
-then:
+It downloads the release binary for this machine with `gh release download` and
+checks it against the release's `checksums.txt`, or copies the newer installed
+swamp, and runs it in a throwaway sandbox: a temporary directory with its own
+`HOME`, so the swamp you have installed, its skills and its caches are never
+touched. Only your sign-in is shared, through `SWAMP_CONFIG_DIR`. In the sandbox
+it runs `swamp repo init`, then:
 
 | Check        | How                                                                                                                                                                                                                                                                                                                                                                                                             |
 | ------------ | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
@@ -48,10 +56,12 @@ timings; `...` in a slide's output matches anything.
 
 The `report` resource records the release, the commits since the previous retest
 (GitHub lists at most 250; `commitsTruncated` says when there were more than
-that, out of `commitsTotal`), command errors and legacy commands with their deck
-line numbers, each lab step with what differed, and the skill files added,
-removed and changed, with a unified diff for each. `ok` is false when a command
-or a lab step fails; the method itself still succeeds, so the report is saved.
+that, out of `commitsTotal`, or when an installed build's commit couldn't be
+compared, as with a local build GitHub doesn't have), command errors and legacy
+commands with their deck line numbers, each lab step with what differed, and the
+skill files added, removed and changed, with a unified diff for each. `ok` is
+false when a command or a lab step fails; the method itself still succeeds, so
+the report is saved.
 
 `retest` runs on macOS and Linux (x86_64 or aarch64): there's no Windows binary
 to run in a sandbox the same way.
@@ -91,10 +101,14 @@ gh api repos/<upstream>/compare/<last tested>...<release>  # commits since the l
 gh release download <release> --repo <upstream> --pattern swamp-<os>-<arch> --pattern checksums.txt
 ```
 
+Outside the sandbox, only `<installedSwamp> version --json`, to read the
+installed build's version.
+
 In the sandbox, with `HOME` set to the sandbox and only `PATH`, `TMPDIR`,
-`LANG`, `NO_COLOR` and `SWAMP_CONFIG_DIR` passed through: the downloaded `swamp`
-(`repo init`, `help`, and the lab's commands from the deck) and the `deno` that
-swamp unpacks into the sandbox's `~/.swamp/deno/`, for the lab's `deno test`.
+`LANG`, `NO_COLOR` and `SWAMP_CONFIG_DIR` passed through: the downloaded or
+copied `swamp` (`repo init`, `help`, and the lab's commands from the deck) and
+the `deno` that swamp unpacks into the sandbox's `~/.swamp/deno/`, for the lab's
+`deno test`.
 
 The checksum check catches a corrupted download; `checksums.txt` comes from the
 same release, so it is not a signature.
