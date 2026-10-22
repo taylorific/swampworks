@@ -103,9 +103,10 @@ const BundleSchema = z.object({
   recoverable: z.array(z.string()).optional(),
   /**
    * Git for Windows' bundle: the http.sslBackend Git uses. With schannel Git
-   * verifies with the Windows store and never reads the bundle.
+   * verifies with the Windows store and never reads the bundle, unless
+   * http.schannelUseSSLCAInfo points schannel at it (schannel-cainfo).
    */
-  gitBackend: z.enum(["openssl", "schannel"]).optional(),
+  gitBackend: z.enum(["openssl", "schannel", "schannel-cainfo"]).optional(),
   exposes: z.array(z.enum(["tls", "codeSigning"])),
 });
 /** What one PEM bundle or Java keystore trusts. */
@@ -283,27 +284,34 @@ function gitDirs(p: Platform): string[] {
   ].filter((x): x is string => !!x);
 }
 
+/** How a Git for Windows install verifies TLS, as far as its bundle goes. */
+export type GitBackend = "openssl" | "schannel" | "schannel-cainfo";
+
 /**
- * The http.sslBackend a Git for Windows install uses: the user's global
- * setting over the install's system one, and openssl when neither is set.
- * Null when its git can't be run.
+ * The http.sslBackend a Git for Windows install uses, openssl when it isn't
+ * set. Git is run from its install directory, which isn't a repository, so
+ * it merges every level but a repository's own (ProgramData, system, XDG
+ * and global) in its own order. With schannel, http.schannelUseSSLCAInfo
+ * makes Git verify against http.sslCAInfo, the bundle, after all. Null when
+ * its git can't be run.
  */
 export async function gitBackend(
   run: Run,
   git: string,
-): Promise<"openssl" | "schannel" | null> {
+): Promise<GitBackend | null> {
   const bin = `${git}\\cmd\\git.exe`;
-  for (const scope of ["--global", "--system"]) {
-    const r = await run(bin, ["config", scope, "--get", "http.sslBackend"]);
+  const get = async (key: string, type: string[] = []) => {
+    const r = await run(bin, ["-C", git, "config", ...type, "--get", key]);
     // git config exits 1 when the key isn't set.
-    if (r.code === 0) {
-      return r.stdout.trim().toLowerCase() === "schannel"
-        ? "schannel"
-        : "openssl";
-    }
-    if (r.code !== 1) return null;
-  }
-  return "openssl";
+    if (r.code === 1) return "";
+    return r.code === 0 ? r.stdout.trim().toLowerCase() : null;
+  };
+  const backend = await get("http.sslBackend");
+  if (backend === null) return null;
+  if (backend !== "schannel") return "openssl";
+  const cainfo = await get("http.schannelUseSSLCAInfo", ["--type=bool"]);
+  if (cainfo === null) return null;
+  return cainfo === "true" ? "schannel-cainfo" : "schannel";
 }
 
 /**
@@ -1196,6 +1204,9 @@ function bundleFix(
     case "perl mozilla::ca":
       return `${where}upgrade Mozilla::CA to 20261020 or later`;
     case "git for windows":
+      if (b.gitBackend === "schannel-cainfo") {
+        return `${where}Git uses schannel, but http.schannelUseSSLCAInfo makes it verify against this bundle; unset it with git config --global --unset http.schannelUseSSLCAInfo (or at the level that sets it, git config --show-origin --get http.schannelUseSSLCAInfo), or upgrade Git for Windows once it ships a bundle without ${listed}`;
+      }
       return `${where}switch Git to the Windows store with git config --global http.sslBackend schannel, or upgrade Git for Windows once it ships a bundle without ${listed}`;
     case "git for windows openssl":
       return `${where}the OpenSSL that ships with Git (openssl.exe in Git Bash, and anything else built on it) trusts this by default; upgrade Git for Windows once it ships a bundle without ${listed}, or remove them from this file`;

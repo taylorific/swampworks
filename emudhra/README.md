@@ -163,10 +163,14 @@ use:
 - Windows: Git for Windows' `mingw64\etc\ssl\certs\ca-bundle.crt`, which Git
   reads with its `openssl` backend, and `mingw64\etc\ssl\cert.pem`, the
   default CA file of the OpenSSL it ships (`openssl.exe` in Git Bash). When
-  `http.sslBackend` is `schannel` (the user's global setting, else the
-  install's system one), Git verifies with the Windows store and never reads
-  `ca-bundle.crt`, so that bundle is listed but exposes nothing. Git's own
-  `curl.exe` is built with Schannel only and uses the Windows store too.
+  `http.sslBackend` is `schannel`, Git verifies with the Windows store and
+  never reads `ca-bundle.crt`, so that bundle is listed but exposes nothing.
+  The setting is read the way Git reads it: from every config level but a
+  repository's (`ProgramData`, system, XDG and global), in Git's own
+  order. With `http.schannelUseSSLCAInfo` true, `schannel` verifies against
+  the bundle after all, so it stays exposed (`gitBackend: schannel-cainfo`).
+  Git's own `curl.exe` is built with Schannel only and uses the Windows store
+  too.
 - With `toolchains`: Python's `certifi`, the copy pip vendors, and Perl's
   `Mozilla::CA`. The pip of macOS's own `python3` gets the page's `PIP_CERT`
   workaround rather than an upgrade.
@@ -361,7 +365,8 @@ rustup --version
 mise --version
 claude --version
 docker version --format '{{.Server.Platform.Name}}'
-<git>\cmd\git.exe config --global --get http.sslBackend    # Windows, per Git install; then --system
+<git>\cmd\git.exe -C <git> config --get http.sslBackend    # Windows, per Git install
+<git>\cmd\git.exe -C <git> config --type=bool --get http.schannelUseSSLCAInfo    # when schannel
 java -XshowSettings:properties -version
 security verify-cert -c <cert> -c <cross-signed root> -l -L -p basic -v    # macOS, x16
 powershell.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass -File <script> -Data <json>   # Windows

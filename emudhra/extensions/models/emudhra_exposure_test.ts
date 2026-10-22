@@ -411,26 +411,44 @@ Deno.test("hostBundles looks in the right places per OS", () => {
   assertEquals(mac.at(-1), { path: "/x.pem", source: "extra" });
 });
 
-Deno.test("gitBackend takes the global http.sslBackend over the system one", async () => {
+/** A Git whose merged config holds `config`; `code` makes every call fail. */
+const fakeGit =
+  (git: string, config: Record<string, string>, code = 0) =>
+  (cmd: string, args: string[]): Promise<RunResult> => {
+    assertEquals(cmd, `${git}\\cmd\\git.exe`);
+    // From the install directory, which isn't a repository: no local config.
+    assertEquals(args.slice(0, 3), ["-C", git, "config"]);
+    const key = args.at(-1)!;
+    if (code !== 0) return Promise.resolve({ code, stdout: "", stderr: "x" });
+    return Promise.resolve(
+      key in config
+        ? { code: 0, stdout: `${config[key]}\n`, stderr: "" }
+        : { code: 1, stdout: "", stderr: "" },
+    );
+  };
+
+Deno.test("gitBackend reads Git's merged config, and schannelUseSSLCAInfo", async () => {
   const git = "C:\\Program Files\\Git";
-  const fake =
-    (global: string | null, system: string | null, code = 0) =>
-    (cmd: string, args: string[]): Promise<RunResult> => {
-      assertEquals(cmd, `${git}\\cmd\\git.exe`);
-      const v = args[1] === "--global" ? global : system;
-      return Promise.resolve(
-        code !== 0
-          ? { code, stdout: "", stderr: "not found" }
-          : v === null
-          ? { code: 1, stdout: "", stderr: "" }
-          : { code: 0, stdout: `${v}\n`, stderr: "" },
-      );
-    };
-  assertEquals(await gitBackend(fake(null, "schannel"), git), "schannel");
-  assertEquals(await gitBackend(fake("openssl", "schannel"), git), "openssl");
-  assertEquals(await gitBackend(fake("Schannel", null), git), "schannel");
-  assertEquals(await gitBackend(fake(null, null), git), "openssl");
-  assertEquals(await gitBackend(fake(null, null, 127), git), null);
+  const b = (config: Record<string, string>, code = 0) =>
+    gitBackend(fakeGit(git, config, code), git);
+  assertEquals(await b({ "http.sslBackend": "Schannel" }), "schannel");
+  assertEquals(await b({ "http.sslBackend": "openssl" }), "openssl");
+  assertEquals(await b({}), "openssl");
+  assertEquals(
+    await b({
+      "http.sslBackend": "schannel",
+      "http.schannelUseSSLCAInfo": "true",
+    }),
+    "schannel-cainfo",
+  );
+  assertEquals(
+    await b({
+      "http.sslBackend": "schannel",
+      "http.schannelUseSSLCAInfo": "false",
+    }),
+    "schannel",
+  );
+  assertEquals(await b({}, 127), null);
 });
 
 Deno.test("Git's bundle exposes nothing when Git uses schannel; its OpenSSL's cert.pem still does", async () => {
@@ -448,8 +466,11 @@ Deno.test("Git's bundle exposes nothing when Git uses schannel; its OpenSSL's ce
       pem,
     ),
   ];
-  const run = (backend: string) => (): Promise<RunResult> =>
-    Promise.resolve({ code: 0, stdout: backend, stderr: "" });
+  const run = (backend: string, cainfo = "false") =>
+    fakeGit(git, {
+      "http.sslBackend": backend,
+      "http.schannelUseSSLCAInfo": cainfo,
+    });
   const base = {
     target: "host",
     kind: "host" as const,
@@ -473,6 +494,12 @@ Deno.test("Git's bundle exposes nothing when Git uses schannel; its OpenSSL's ce
     assess(base, [os], [], []).remediation[0],
     "http.sslBackend schannel",
   );
+
+  // schannel pointed back at the bundle still reads it.
+  const [ca] = await applyGitBackends(run("schannel", "true"), bundles);
+  assertEquals([ca.gitBackend, ca.exposes], ["schannel-cainfo", ["tls"]]);
+  const caFix = assess(base, [ca], [], []).remediation[0];
+  assertStringIncludes(caFix, "--unset http.schannelUseSSLCAInfo");
 });
 
 Deno.test("assess rolls findings into TLS and code-signing status", async () => {
