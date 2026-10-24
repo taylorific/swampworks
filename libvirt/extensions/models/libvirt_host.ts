@@ -16,10 +16,27 @@ import { check, ConnectionSchema, type Session } from "./_lib/runner.ts";
 // `apply` installs what's missing; neither touches networks or pools, which
 // are their own types.
 
-/** Packages the deck installs, by Ubuntu release. */
+/**
+ * Packages the deck installs, by Ubuntu release: QEMU, libvirt and
+ * virtinst, curl for cloud images, and on 24.04 genisoimage, since its
+ * virt-install can't build a cloud-init seed itself.
+ */
 export const PACKAGES: Record<string, string[]> = {
-  "24.04": ["qemu-kvm", "libvirt-daemon-system", "virtinst"],
-  "26.04": ["qemu-system-hwe", "libvirt-daemon-system-hwe", "virtinst"],
+  "24.04": [
+    "qemu-kvm",
+    "libvirt-daemon-system",
+    "virtinst",
+    "ca-certificates",
+    "curl",
+    "genisoimage",
+  ],
+  "26.04": [
+    "qemu-system-hwe",
+    "libvirt-daemon-system-hwe",
+    "virtinst",
+    "ca-certificates",
+    "curl",
+  ],
 };
 
 const GlobalArgsSchema = ConnectionSchema.extend({
