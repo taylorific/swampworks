@@ -1,0 +1,33 @@
+manifestVersion: 1
+name: "@taylor/libvirt"
+version: "2026.10.24.2"
+license: AGPL-3.0-or-later
+description: "Set up an Ubuntu host to run KVM/QEMU virtual machines with libvirt, the way the kvm-training deck does it, with the check/apply pattern @adam/cfgmgmt uses: host (the QEMU, libvirt and virtinst packages, and the user added to libvirt and kvm), pool (directory storage pools), network (nat, bridge, macvtap or routed) and uplink, which says which of those can work on the host and why: Wi-Fi can't be bridged, a host that is itself a VM needs its hypervisor's help, and Docker can block bridged traffic. Every type runs on the host itself, as a swamp worker step, or over SSH with cfgmgmt's nodeHost arguments; workflows for both are included."
+repository: "https://github.com/taylorific/swampworks"
+models:
+  - libvirt_host.ts
+  - libvirt_uplink.ts
+  - libvirt_pool.ts
+  - libvirt_network.ts
+workflows:
+  - workflow-kvm-host-check.yaml
+  - workflow-kvm-host-apply.yaml
+  - workflow-kvm-host-check-ssh.yaml
+  - workflow-kvm-host-apply-ssh.yaml
+additionalFiles:
+  - README.md
+  - LICENSE
+  - COPYING
+  - COPYING-EXCEPTION
+platforms:
+  - darwin-aarch64
+  - darwin-x86_64
+  - linux-x86_64
+  - linux-aarch64
+labels:
+  - libvirt
+  - kvm
+  - qemu
+  - virsh
+  - virtualization
+  - ubuntu
