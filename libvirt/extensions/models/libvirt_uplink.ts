@@ -14,7 +14,7 @@ import {
   NetworkFactsSchema,
   readNetworkFacts,
 } from "./_lib/network.ts";
-import { ConnectionSchema } from "./_lib/runner.ts";
+import { connectionChecks, ConnectionSchema } from "./_lib/runner.ts";
 
 // The host's uplink, and which ways of connecting guests can work on it.
 // The interface holding the default route decides most of it: an access
@@ -83,6 +83,7 @@ export const model = {
   type: "@taylor/libvirt/uplink",
   version: "2026.10.24.2",
   globalArguments: GlobalArgsSchema,
+  checks: connectionChecks(["check"]),
   resources: {
     state: {
       description:

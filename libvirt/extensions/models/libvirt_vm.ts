@@ -3,12 +3,18 @@ import { metaData, userData } from "./_lib/cloudinit.ts";
 import {
   type Context,
   converge,
+  type Logger,
   type Resource,
   type Seams,
   StateBaseSchema,
   withSession,
 } from "./_lib/converge.ts";
-import { check, ConnectionSchema, type Session } from "./_lib/runner.ts";
+import {
+  check,
+  connectionChecks,
+  ConnectionSchema,
+  type Session,
+} from "./_lib/runner.ts";
 import { parseInfo, parsePoolTarget, writeTemp } from "./_lib/virsh.ts";
 
 // An Ubuntu Server guest made the way the kvm-training deck makes one: the
@@ -236,7 +242,11 @@ function rebuildChanges(v: VmState, g: GlobalArgs): string[] {
 }
 
 /** Downloads the cloud image into the cache unless a verified copy is there. */
-async function cachedImage(s: Session, g: GlobalArgs): Promise<string> {
+async function cachedImage(
+  s: Session,
+  g: GlobalArgs,
+  log: Logger,
+): Promise<string> {
   const arch = check(await s.run("uname", ["-m"]), "uname -m").stdout.trim();
   const url = imageUrl(g, arch);
   const file = url.split("/").pop()!;
@@ -253,7 +263,11 @@ async function cachedImage(s: Session, g: GlobalArgs): Promise<string> {
   const path = `${IMAGE_CACHE}/${file}`;
   const sha = async (p: string) =>
     (await s.sudo("sha256sum", [p])).stdout.split(/\s+/)[0] ?? "";
-  if ((await sha(path)) === want) return path;
+  if ((await sha(path)) === want) {
+    log.info("Using the cached {file}", { file: path });
+    return path;
+  }
+  log.info("Downloading {url}", { url });
   check(await s.sudo("mkdir", ["-p", IMAGE_CACHE]), `mkdir ${IMAGE_CACHE}`);
   const part = `${path}.part`;
   check(
@@ -289,9 +303,13 @@ async function waitForIp(s: Session, g: GlobalArgs): Promise<string> {
   );
 }
 
-async function createVm(s: Session, g: GlobalArgs): Promise<void> {
+async function createVm(
+  s: Session,
+  g: GlobalArgs,
+  log: Logger,
+): Promise<void> {
   const virsh = (...a: string[]) => s.sudo("virsh", ["-c", g.uri, ...a]);
-  const image = await cachedImage(s, g);
+  const image = await cachedImage(s, g, log);
   const target = parsePoolTarget(
     check(await virsh("pool-dumpxml", g.pool), `pool ${g.pool}`).stdout,
   );
@@ -302,104 +320,120 @@ async function createVm(s: Session, g: GlobalArgs): Promise<void> {
       `${disk} already exists but no VM ${g.name} does; move or delete it first`,
     );
   }
-  check(
-    await s.sudo("qemu-img", [
-      "convert",
-      "-f",
-      "qcow2",
-      "-O",
-      "qcow2",
-      image,
-      disk,
-    ]),
-    "qemu-img convert",
-  );
-  check(
-    await s.sudo("qemu-img", ["resize", "-f", "qcow2", disk, g.diskSize]),
-    "qemu-img resize",
-  );
-  await virsh("pool-refresh", g.pool);
-
-  const user = await writeTemp(
-    s,
-    userData({
-      hostname: g.name,
-      sshAuthorizedKeys: g.sshAuthorizedKeys,
-      password: g.password,
-      packages: g.packages,
-    }),
-    ".user-data",
-  );
-  const meta = await writeTemp(s, metaData(g.name), ".meta-data");
+  // From here on the VM's files are ours: if creating it fails, remove
+  // them, so the next apply doesn't refuse over a leftover disk.
+  let seedIso: string | null = null;
   try {
-    let mode = g.cloudInit;
-    if (mode === "auto") {
-      const v = await s.run("virt-install", ["--version"]);
-      mode = virtInstallSeeds(parseVersion(v.stdout))
-        ? "virt-install"
-        : "seed-iso";
-    }
-    const seed: string[] = [];
-    if (mode === "virt-install") {
-      seed.push(
-        "--cloud-init",
-        `user-data=${user},meta-data=${meta},disable=on`,
-      );
-    } else {
-      const iso = `${SEED_DIR}/${g.name}-cloud-init.iso`;
-      const tool =
-        (await s.run("sh", ["-c", "command -v genisoimage"])).code ===
-            0
-          ? ["genisoimage"]
-          : ["xorriso", "-as", "mkisofs"];
-      check(await s.sudo("mkdir", ["-p", SEED_DIR]), `mkdir ${SEED_DIR}`);
-      check(
-        await s.sudo(tool[0], [
-          ...tool.slice(1),
-          "-output",
-          iso,
-          "-volid",
-          "cidata",
-          "-joliet",
-          "-rock",
-          "-graft-points",
-          `user-data=${user}`,
-          `meta-data=${meta}`,
-        ]),
-        "Building the cloud-init seed ISO",
-      );
-      seed.push("--disk", `${iso},device=cdrom`);
-    }
     check(
-      await s.sudo("virt-install", [
-        "--connect",
-        g.uri,
-        "--name",
-        g.name,
-        "--boot",
-        "uefi",
-        "--memory",
-        String(g.memory),
-        "--vcpus",
-        String(g.vcpus),
-        "--os-variant",
-        g.osVariant,
-        "--disk",
-        `${disk},bus=virtio`,
-        ...seed,
-        "--network",
-        `network=${g.network},model=virtio`,
-        "--graphics",
-        "spice",
-        "--noautoconsole",
-        "--console",
-        "pty,target_type=serial",
-        "--import",
+      await s.sudo("qemu-img", [
+        "convert",
+        "-f",
+        "qcow2",
+        "-O",
+        "qcow2",
+        image,
+        disk,
       ]),
-      "virt-install",
+      "qemu-img convert",
     );
-  } finally {
-    await s.run("rm", ["-f", user, meta]);
+    check(
+      await s.sudo("qemu-img", ["resize", "-f", "qcow2", disk, g.diskSize]),
+      "qemu-img resize",
+    );
+    await virsh("pool-refresh", g.pool);
+
+    const user = await writeTemp(
+      s,
+      userData({
+        hostname: g.name,
+        sshAuthorizedKeys: g.sshAuthorizedKeys,
+        password: g.password,
+        packages: g.packages,
+      }),
+      ".user-data",
+    );
+    const meta = await writeTemp(s, metaData(g.name), ".meta-data");
+    try {
+      let mode = g.cloudInit;
+      if (mode === "auto") {
+        const v = await s.run("virt-install", ["--version"]);
+        mode = virtInstallSeeds(parseVersion(v.stdout))
+          ? "virt-install"
+          : "seed-iso";
+      }
+      const seed: string[] = [];
+      if (mode === "virt-install") {
+        seed.push(
+          "--cloud-init",
+          `user-data=${user},meta-data=${meta},disable=on`,
+        );
+      } else {
+        const iso = `${SEED_DIR}/${g.name}-cloud-init.iso`;
+        const tool =
+          (await s.run("sh", ["-c", "command -v genisoimage"])).code ===
+              0
+            ? ["genisoimage"]
+            : ["xorriso", "-as", "mkisofs"];
+        check(await s.sudo("mkdir", ["-p", SEED_DIR]), `mkdir ${SEED_DIR}`);
+        seedIso = iso;
+        check(
+          await s.sudo(tool[0], [
+            ...tool.slice(1),
+            "-output",
+            iso,
+            "-volid",
+            "cidata",
+            "-joliet",
+            "-rock",
+            "-graft-points",
+            `user-data=${user}`,
+            `meta-data=${meta}`,
+          ]),
+          "Building the cloud-init seed ISO",
+        );
+        // It may hold a password; libvirt hands it to QEMU itself.
+        check(await s.sudo("chmod", ["600", iso]), `chmod ${iso}`);
+        seed.push("--disk", `${iso},device=cdrom`);
+      }
+      log.info("Creating {name} with virt-install ({mode})", {
+        name: g.name,
+        mode: mode === "virt-install" ? "--cloud-init" : "seed ISO",
+      });
+      check(
+        await s.sudo("virt-install", [
+          "--connect",
+          g.uri,
+          "--name",
+          g.name,
+          "--boot",
+          "uefi",
+          "--memory",
+          String(g.memory),
+          "--vcpus",
+          String(g.vcpus),
+          "--os-variant",
+          g.osVariant,
+          "--disk",
+          `${disk},bus=virtio`,
+          ...seed,
+          "--network",
+          `network=${g.network},model=virtio`,
+          "--graphics",
+          "spice",
+          "--noautoconsole",
+          "--console",
+          "pty,target_type=serial",
+          "--import",
+        ]),
+        "virt-install",
+      );
+    } finally {
+      await s.run("rm", ["-f", user, meta]);
+    }
+  } catch (err) {
+    await s.sudo("rm", ["-f", disk, ...(seedIso ? [seedIso] : [])]);
+    await virsh("pool-refresh", g.pool);
+    throw err;
   }
 }
 
@@ -451,13 +485,13 @@ export const vmResource: Resource<GlobalArgs, VmState> = {
     }
     return changes;
   },
-  async apply(s, g, v) {
+  async apply(s, g, v, _changes, log) {
     if (g.ensure === "absent") return await removeVm(s, g, v);
     if (v.exists) {
       const rebuild = rebuildChanges(v, g);
       if (rebuild.length) throw new Error(rebuild.join("; "));
     } else {
-      await createVm(s, g);
+      await createVm(s, g, log);
     }
     const now = await readVm(s, g);
     const virsh = (...a: string[]) => s.sudo("virsh", ["-c", g.uri, ...a]);
@@ -468,7 +502,16 @@ export const vmResource: Resource<GlobalArgs, VmState> = {
       check(await virsh("shutdown", g.name), "virsh shutdown");
       return;
     }
-    if (g.running && g.waitForIp) await waitForIp(s, g);
+    if (g.running && g.waitForIp) {
+      log.info(
+        "Waiting up to {seconds}s for {name}'s guest agent to report an address",
+        {
+          seconds: g.timeoutSeconds,
+          name: g.name,
+        },
+      );
+      await waitForIp(s, g);
+    }
   },
   details: (v) => ({ ...v }),
   notes(v) {
@@ -531,6 +574,13 @@ export const model = {
   type: "@taylor/libvirt/vm",
   version: "2026.10.24.2",
   globalArguments: GlobalArgsSchema,
+  checks: connectionChecks([
+    "check",
+    "apply",
+    "snapshot",
+    "revert",
+    "deleteSnapshot",
+  ]),
   resources: {
     state: {
       description:

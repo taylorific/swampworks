@@ -24,7 +24,7 @@ const URL = `https://cloud-images.ubuntu.com/resolute/current/${IMG}`;
 const DOMIFADDR = ` Name       MAC address          Protocol     Address
 -------------------------------------------------------------------------------
  lo         00:00:00:00:00:00    ipv4         127.0.0.1/8
- enp1s0     52:54:00:6b:3c:58    ipv4         10.63.45.240/22
+ enp1s0     52:54:00:6b:3c:58    ipv4         192.0.2.40/24
  -          -                    ipv6         fe80::5054:ff:fe6b:3c58/64`;
 
 const DOMIFLIST = ` Interface   Type      Source         Model    MAC
@@ -32,7 +32,7 @@ const DOMIFLIST = ` Interface   Type      Source         Model    MAC
  vnet0       network   host-network   virtio   52:54:00:6b:3c:58`;
 
 Deno.test("parse helpers read virsh's tables", () => {
-  assertEquals(parseDomifaddr(DOMIFADDR), "10.63.45.240");
+  assertEquals(parseDomifaddr(DOMIFADDR), "192.0.2.40");
   assertEquals(parseDomifaddr(""), null);
   assertEquals(parseDomiflist(DOMIFLIST), {
     network: "host-network",
@@ -109,6 +109,7 @@ const base = {
   "rm -f /tmp/libvirt-a.user-data /tmp/libvirt-b.meta-data": ok(),
   "virt-install --version": ok("5.1.0"),
   "sudo -n virt-install *": ok(),
+  "sudo -n chmod 600 /var/lib/libvirt/boot/u1-cloud-init.iso": ok(),
   [`${V} dominfo u1`]: ok("State: running\nCPU(s): 2\nMax memory: 2097152 KiB"),
   [`${V} domiflist u1`]: ok(DOMIFLIST),
   [`${V} domifaddr u1 --source agent`]: ok(DOMIFADDR),
@@ -146,7 +147,7 @@ Deno.test("vm apply uses the cached image, virt-install's seed, and waits for th
     { ...base, [`${V} list --all --name`]: listed },
   );
   assertEquals(state!.status, "applied");
-  assertEquals(state!.ip, "10.63.45.240");
+  assertEquals(state!.ip, "192.0.2.40");
   assert(
     !calls.some((c) => c.includes("curl -fsSL --retry 3 -o")),
     "cache hit",
@@ -268,4 +269,60 @@ Deno.test("revert starts a VM that was running, since disk-only reverts shut it 
     [`${V} snapshot-current u1 --name`]: ok("clean"),
   });
   assert(calls.some((c) => c.endsWith("start u1")));
+});
+
+Deno.test("the password reaches the host on stdin, never in a command line", async () => {
+  const { calls, inputs } = await runMethod(
+    vm,
+    "apply",
+    { name: "u1", password: "s3cr3t-pw" },
+    { ...base, [`${V} list --all --name`]: listed },
+  );
+  assert(!calls.some((c) => c.includes("s3cr3t-pw")));
+  assertStringIncludes(
+    inputs['sh -c cat > "$1" sh /tmp/libvirt-a.user-data'],
+    "password: s3cr3t-pw",
+  );
+});
+
+Deno.test("a seed ISO is readable only by root", async () => {
+  const { calls } = await runMethod(vm, "apply", {
+    name: "u1",
+    cloudInit: "seed-iso",
+  }, {
+    ...base,
+    [`${V} list --all --name`]: listed,
+    "sudo -n mkdir -p /var/lib/libvirt/boot": ok(),
+    "sh -c command -v genisoimage": fail(),
+    "sudo -n xorriso *": ok(),
+  });
+  const iso = calls.findIndex((c) =>
+    c.startsWith("sudo -n xorriso -as mkisofs")
+  );
+  const chmod = calls.indexOf(
+    "sudo -n chmod 600 /var/lib/libvirt/boot/u1-cloud-init.iso",
+  );
+  assert(iso >= 0 && chmod > iso);
+});
+
+Deno.test("a failed virt-install removes the disk and seed it made", async () => {
+  const { state, calls, error } = await runMethod(
+    vm,
+    "apply",
+    { name: "u1", cloudInit: "seed-iso" },
+    {
+      ...base,
+      [`${V} list --all --name`]: ok(""),
+      "sudo -n mkdir -p /var/lib/libvirt/boot": ok(),
+      "sudo -n genisoimage *": ok(),
+      "sudo -n virt-install *": fail("ERROR    Network not found"),
+      "sudo -n rm -f /var/lib/libvirt/images/u1.qcow2 /var/lib/libvirt/boot/u1-cloud-init.iso":
+        ok(),
+    },
+  );
+  assertEquals(state!.status, "failed");
+  assertStringIncludes(error!.message, "Network not found");
+  assert(calls.includes(
+    "sudo -n rm -f /var/lib/libvirt/images/u1.qcow2 /var/lib/libvirt/boot/u1-cloud-init.iso",
+  ));
 });

@@ -13,8 +13,16 @@ export interface RunResult {
   stderr: string;
 }
 
-/** Runs a command with the given arguments. Injectable for tests. */
-export type Run = (cmd: string, args: string[]) => Promise<RunResult>;
+/**
+ * Runs a command with the given arguments, and `input` on its stdin. Secrets
+ * go in `input`, never in arguments, which other users can see in `ps`.
+ * Injectable for tests.
+ */
+export type Run = (
+  cmd: string,
+  args: string[],
+  input?: string,
+) => Promise<RunResult>;
 
 /** Where commands run, and whether they run with sudo. */
 export const ConnectionSchema = z.object({
@@ -38,17 +46,23 @@ export type Connection = z.infer<typeof ConnectionSchema>;
 
 /** Runs real commands, reporting one that can't be started as code 127. */
 export function commandRunner(timeoutMs = 600000): Run {
-  return async (cmd, args) => {
+  return async (cmd, args, input) => {
     let out: Deno.CommandOutput;
     try {
       // swamp-quality-ignore deno-command: runs ssh and the probes and changes listed in README What it runs; argument lists are built in this extension
-      out = await new Deno.Command(cmd, {
+      const child = new Deno.Command(cmd, {
         args,
-        stdin: "null",
+        stdin: input === undefined ? "null" : "piped",
         stdout: "piped",
         stderr: "piped",
         signal: AbortSignal.timeout(timeoutMs),
-      }).output();
+      }).spawn();
+      if (input !== undefined) {
+        const w = child.stdin.getWriter();
+        await w.write(new TextEncoder().encode(input));
+        await w.close();
+      }
+      out = await child.output();
     } catch (err) {
       return { code: 127, stdout: "", stderr: (err as Error).message };
     }
@@ -106,13 +120,12 @@ export function sshArgs(c: Connection, controlDir: string | null): string[] {
  * shell one command line, so each word is quoted.
  */
 export function sshRunner(run: Run, dest: string, opts: string[]): Run {
-  return (cmd, args) =>
-    run("ssh", [
-      ...opts,
-      "--",
-      dest,
-      [cmd, ...args].map(shQuote).join(" "),
-    ]);
+  return (cmd, args, input) =>
+    run(
+      "ssh",
+      [...opts, "--", dest, [cmd, ...args].map(shQuote).join(" ")],
+      input,
+    );
 }
 
 /** Commands on the host, plain and as root. */
@@ -142,8 +155,8 @@ export async function openSession(c: Connection, local: Run): Promise<Session> {
     control = await Deno.makeTempDir({ dir: "/tmp", prefix: "libvirt-ssh-" })
       .catch(() => null);
     const ssh = sshRunner(local, sshDest(c), sshArgs(c, control));
-    run = async (cmd, args) => {
-      const r = await ssh(cmd, args);
+    run = async (cmd, args, input) => {
+      const r = await ssh(cmd, args, input);
       if (r.code === 255) lost ??= r;
       return r;
     };
@@ -173,7 +186,9 @@ export async function openSession(c: Connection, local: Run): Promise<Session> {
   }
   return {
     run,
-    sudo: c.become ? (cmd, args) => run("sudo", ["-n", cmd, ...args]) : run,
+    sudo: c.become
+      ? (cmd, args, input) => run("sudo", ["-n", cmd, ...args], input)
+      : run,
     host: name.stdout.trim(),
     assertConnected() {
       if (lost) {
@@ -196,4 +211,45 @@ export function check(r: RunResult, what: string): RunResult {
     );
   }
   return r;
+}
+
+/** What swamp hands a pre-flight check. */
+export interface CheckContext {
+  globalArgs: Connection;
+}
+
+/** Whether these settings can reach a KVM host from this machine. */
+export async function checkConnection(
+  c: Connection,
+  os: string,
+  local: Run,
+): Promise<{ pass: boolean; errors?: string[] }> {
+  if (!c.nodeHost) {
+    return os === "linux" ? { pass: true } : {
+      pass: false,
+      errors: [
+        `This machine is ${os}, not a KVM host: set nodeHost to reach one over SSH, or place the step on a worker on the host`,
+      ],
+    };
+  }
+  // ssh -V prints its version to stderr and exits 0.
+  const r = await local("ssh", ["-V"]);
+  return r.code === 0 ? { pass: true } : {
+    pass: false,
+    errors: [`ssh isn't available to reach ${c.nodeHost}: ${r.stderr}`],
+  };
+}
+
+/** The connection pre-flight check, for every method that reaches the host. */
+export function connectionChecks(methods: string[]) {
+  return {
+    "host-reachable": {
+      description:
+        "Commands can reach a KVM host: this is Linux, or nodeHost is set and ssh is installed",
+      labels: ["policy"],
+      appliesTo: methods,
+      execute: (ctx: CheckContext) =>
+        checkConnection(ctx.globalArgs, Deno.build.os, commandRunner(30000)),
+    },
+  };
 }

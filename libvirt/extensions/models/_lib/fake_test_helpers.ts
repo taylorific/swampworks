@@ -11,12 +11,17 @@ export const fail = (stderr = "error"): RunResult => ({
 /** Answers by command line; a function answer can see earlier calls. */
 export type Answer = RunResult | ((calls: string[]) => RunResult);
 
-/** A fake runner: exact command lines first, then prefixes; records calls. */
+/**
+ * A fake runner: exact command lines first, then prefixes ending in `*`.
+ * Records every command line, and what each one got on stdin.
+ */
 export function fakeRun(answers: Record<string, Answer>) {
   const calls: string[] = [];
-  const run = (cmd: string, args: string[]) => {
+  const inputs: Record<string, string> = {};
+  const run = (cmd: string, args: string[], input?: string) => {
     const line = [cmd, ...args].join(" ");
     calls.push(line);
+    if (input !== undefined) inputs[line] = input;
     const key = line in answers
       ? line
       : Object.keys(answers).find((k) =>
@@ -25,7 +30,7 @@ export function fakeRun(answers: Record<string, Answer>) {
     const a = key === undefined ? fail(`unexpected: ${line}`) : answers[key];
     return Promise.resolve(typeof a === "function" ? a(calls) : a);
   };
-  return { run, calls };
+  return { run, calls, inputs };
 }
 
 interface Methods {
@@ -45,7 +50,7 @@ export async function runMethod(
     globalArgs: model.globalArguments.parse(globals),
     methodName: method,
   });
-  const { run, calls } = fakeRun(answers);
+  const { run, calls, inputs } = fakeRun(answers);
   let error: Error | null = null;
   try {
     await model.methods[method].execute({ _run: run }, test.context);
@@ -57,6 +62,7 @@ export async function runMethod(
     state: state?.data as Record<string, unknown> | undefined,
     name: state?.name,
     calls,
+    inputs,
     error,
   };
 }

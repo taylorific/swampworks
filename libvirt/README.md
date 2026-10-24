@@ -84,7 +84,7 @@ the deck defines `default` there and `iso` beside it.
 | `mode`      | all         | `nat`, `bridge`, `macvtap` or `routed`                                 |
 | `bridge`    | bridge, nat | The host's Linux bridge (bridge); libvirt's own bridge (nat, optional) |
 | `interface` | macvtap     | The wired interface guests share                                       |
-| `address`   | nat, routed | The host's address on the guest subnet, e.g. `192.168.123.1/24`        |
+| `address`   | nat, routed | The host's address on the guest subnet, e.g. `198.51.100.1/24`        |
 | `ensure`    | all         | `present` or `absent`                                                  |
 | `autostart` | all         | `true`                                                                 |
 
@@ -177,16 +177,16 @@ while data, vaults and guards stay with `swamp serve`.
 # On the orchestrator: a worker enrollment token, then serve (TLS is required
 # off loopback)
 swamp worker token create kvm1 --duration 7d
-swamp serve --host 10.0.0.5 --cert-file serve.crt --key-file serve.key \
+swamp serve --host 192.0.2.5 --cert-file serve.crt --key-file serve.key \
   --auth-mode token --admins user:<your id>
 
 # On the KVM host, with swamp installed and `swamp auth login` done
-swamp worker connect wss://10.0.0.5:4000 --token-file enroll.token \
+swamp worker connect wss://192.0.2.5:4000 --token-file enroll.token \
   --server-token-file conn.token --ca-cert ca.crt \
   --label role=kvm-host --cache-dir ~/.config/swamp-worker/cache
 
 # From anywhere
-swamp workflow run @taylor/kvm-host-apply --server wss://10.0.0.5:4000 \
+swamp workflow run @taylor/kvm-host-apply --server wss://192.0.2.5:4000 \
   --input mode=bridge --input bridge=br0
 ```
 
@@ -197,7 +197,7 @@ runs and set `nodeHost` on every step. The host needs only `sshd` and
 passwordless sudo.
 
 ```bash
-swamp workflow run @taylor/kvm-host-apply-ssh --input host=taylor@10.63.45.217
+swamp workflow run @taylor/kvm-host-apply-ssh --input host=admin@kvm1.example.com
 ```
 
 They use their own behavior names (`ssh-kvm-*`). A virtual behavior keeps the
@@ -210,7 +210,7 @@ would inherit `nodeHost` and its worker would SSH to itself.
 remove one VM. Each VM gets its own behavior, `kvm-vm-<name>`.
 
 ```bash
-swamp workflow run @taylor/kvm-vm --server wss://10.0.0.5:4000 \
+swamp workflow run @taylor/kvm-vm --server wss://192.0.2.5:4000 \
   --input-file vm.json   # {"name": "ubuntu-server-2604", "network": "host-network",
                          #  "sshAuthorizedKeys": ["ssh-ed25519 AAAA… me"]}
 swamp data query 'modelName == "kvm-vm-ubuntu-server-2604"' --select content.ip

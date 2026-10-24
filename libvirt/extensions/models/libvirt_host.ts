@@ -6,7 +6,12 @@ import {
   type Seams,
   StateBaseSchema,
 } from "./_lib/converge.ts";
-import { check, ConnectionSchema, type Session } from "./_lib/runner.ts";
+import {
+  check,
+  connectionChecks,
+  ConnectionSchema,
+  type Session,
+} from "./_lib/runner.ts";
 
 // An Ubuntu host ready to run KVM/QEMU guests with libvirt, as the
 // kvm-training deck sets it up: the QEMU, libvirt and virtinst packages for
@@ -192,6 +197,7 @@ export const model = {
   type: "@taylor/libvirt/host",
   version: "2026.10.24.2",
   globalArguments: GlobalArgsSchema,
+  checks: connectionChecks(["check", "apply"]),
   resources: {
     state: {
       description:

@@ -17,26 +17,26 @@ const NUC_LINKS = JSON.stringify([
     ifname: "enp113s0",
     link_type: "ether",
     operstate: "DOWN",
-    address: "a4:ae:11:1e:48:fb",
+    address: "02:00:00:00:00:02",
   },
   {
     ifname: "eno1",
     link_type: "ether",
     operstate: "UP",
-    address: "a4:ae:11:1e:48:fa",
+    address: "02:00:00:00:00:01",
     master: "br0",
   },
   {
     ifname: "wlp4s0",
     link_type: "ether",
     operstate: "DOWN",
-    address: "5c:80:b6:20:f7:ce",
+    address: "02:00:00:00:00:03",
   },
   {
     ifname: "br0",
     link_type: "ether",
     operstate: "UP",
-    address: "96:8a:5d:1c:f0:6d",
+    address: "02:00:00:00:00:04",
     linkinfo: { info_kind: "bridge" },
   },
 ]);
@@ -44,7 +44,7 @@ const NUC_ADDRS = JSON.stringify([
   {
     ifname: "br0",
     addr_info: [
-      { family: "inet", local: "10.63.45.217", prefixlen: 22 },
+      { family: "inet", local: "192.0.2.10", prefixlen: 24 },
       { family: "inet6", local: "fe80::948a:5dff:fe1c:f06d", prefixlen: 64 },
     ],
   },
@@ -78,7 +78,7 @@ const nuc = () =>
     NUC_LINKS,
     NUC_ADDRS,
     ["wlp4s0"],
-    '[{"dev":"br0","gateway":"10.63.44.1"}]',
+    '[{"dev":"br0","gateway":"192.0.2.1"}]',
   );
 
 /** A laptop on Wi-Fi, nothing bridged. */
@@ -89,10 +89,10 @@ const laptop = (extra: Partial<NetworkFacts> = {}) =>
     ]),
     JSON.stringify([{
       ifname: "wlp0s20f3",
-      addr_info: [{ family: "inet", local: "192.168.1.40", prefixlen: 24 }],
+      addr_info: [{ family: "inet", local: "198.51.100.40", prefixlen: 24 }],
     }]),
     ["wlp0s20f3"],
-    '[{"dev":"wlp0s20f3","gateway":"192.168.1.1"}]',
+    '[{"dev":"wlp0s20f3","gateway":"198.51.100.1"}]',
     extra,
   );
 
@@ -102,10 +102,10 @@ const server = (extra: Partial<NetworkFacts> = {}) =>
     JSON.stringify([{ ifname: "ens33", link_type: "ether", operstate: "UP" }]),
     JSON.stringify([{
       ifname: "ens33",
-      addr_info: [{ family: "inet", local: "172.25.0.112", prefixlen: 22 }],
+      addr_info: [{ family: "inet", local: "203.0.113.112", prefixlen: 22 }],
     }]),
     [],
-    '[{"dev":"ens33","gateway":"172.25.0.1"}]',
+    '[{"dev":"ens33","gateway":"203.0.113.1"}]',
     extra,
   );
 
@@ -121,7 +121,7 @@ Deno.test("parseInterfaces names Wi-Fi from sysfs, bridges from linkinfo", () =>
     ],
   );
   assertEquals(ifs[3].addresses, [
-    "10.63.45.217/22",
+    "192.0.2.10/24",
     "fe80::948a:5dff:fe1c:f06d/64",
   ]);
 });
@@ -132,7 +132,7 @@ Deno.test("the uplink is the default route's bridge and its ports", () => {
     kind: "bridge",
     ports: ["eno1"],
     wireless: false,
-    addresses: ["10.63.45.217/22"],
+    addresses: ["192.0.2.10/24"],
   });
 });
 
@@ -235,5 +235,5 @@ Deno.test("netplan Wi-Fi in a bridge is flagged", () => {
 Deno.test("cidrsOverlap compares by the shorter prefix", () => {
   assertEquals(cidrsOverlap("192.168.122.50/24", "192.168.122.0/24"), true);
   assertEquals(cidrsOverlap("192.168.0.0/16", "192.168.122.0/24"), true);
-  assertEquals(cidrsOverlap("10.63.45.217/22", "192.168.122.0/24"), false);
+  assertEquals(cidrsOverlap("192.0.2.10/24", "192.168.122.0/24"), false);
 });
