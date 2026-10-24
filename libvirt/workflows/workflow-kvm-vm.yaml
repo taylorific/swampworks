@@ -1,0 +1,62 @@
+id: 1dd15256-1b96-43f6-ac34-3de8f9540ebc
+name: "@taylor/kvm-vm"
+description: "Create, start or remove an Ubuntu Server VM the kvm-training way on a swamp worker labelled role=kvm-host"
+tags: {}
+inputs:
+  required: [name]
+  properties:
+    name:
+      type: string
+      description: VM name, also its hostname
+    network:
+      type: string
+      default: host-network
+      description: libvirt network to attach to
+    release:
+      type: string
+      enum: ["24.04", "26.04"]
+      default: "26.04"
+    memory:
+      type: integer
+      default: 2048
+      description: Memory in MiB
+    vcpus:
+      type: integer
+      default: 2
+    diskSize:
+      type: string
+      default: 32G
+    sshAuthorizedKeys:
+      type: array
+      items:
+        type: string
+      default: []
+      description: Public keys for the ubuntu user
+    ensure:
+      type: string
+      enum: [present, absent]
+      default: present
+jobs:
+  - name: vm
+    description: Runs on the KVM host itself, through a swamp worker
+    labels:
+      role: kvm-host
+    steps:
+      - name: vm
+        description: The VM, created from the cloud image and waited on until it has an address
+        task:
+          type: model_method
+          modelType: "@taylor/libvirt/vm"
+          modelName: kvm-vm-${{ inputs.name }}
+          methodName: apply
+          globalArgs:
+            name: ${{ inputs.name }}
+            network: ${{ inputs.network }}
+            release: ${{ inputs.release }}
+            memory: ${{ inputs.memory }}
+            vcpus: ${{ inputs.vcpus }}
+            diskSize: ${{ inputs.diskSize }}
+            sshAuthorizedKeys: ${{ inputs.sshAuthorizedKeys }}
+            ensure: ${{ inputs.ensure }}
+        dependsOn: []
+version: 1

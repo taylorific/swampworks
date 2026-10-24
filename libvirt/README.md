@@ -14,12 +14,13 @@ depend on it don't run.
 
 ## Types
 
-| Type                      | Methods          | Manages                                                                         |
-| ------------------------- | ---------------- | ------------------------------------------------------------------------------- |
-| `@taylor/libvirt/uplink`  | `check`          | Which ways of connecting guests can work on the host's uplink; netplan mistakes |
-| `@taylor/libvirt/host`    | `check`, `apply` | The QEMU, libvirt and virtinst packages; the user in `libvirt` and `kvm`        |
-| `@taylor/libvirt/pool`    | `check`, `apply` | A directory storage pool, started and autostarted                               |
-| `@taylor/libvirt/network` | `check`, `apply` | A libvirt network: `nat`, `bridge`, `macvtap` or `routed`                       |
+| Type                      | Methods                                                  | Manages                                                                         |
+| ------------------------- | -------------------------------------------------------- | ------------------------------------------------------------------------------- |
+| `@taylor/libvirt/uplink`  | `check`                                                  | Which ways of connecting guests can work on the host's uplink; netplan mistakes |
+| `@taylor/libvirt/host`    | `check`, `apply`                                         | The QEMU, libvirt and virtinst packages; the user in `libvirt` and `kvm`        |
+| `@taylor/libvirt/pool`    | `check`, `apply`                                         | A directory storage pool, started and autostarted                               |
+| `@taylor/libvirt/network` | `check`, `apply`                                         | A libvirt network: `nat`, `bridge`, `macvtap` or `routed`                       |
+| `@taylor/libvirt/vm`      | `check`, `apply`, `snapshot`, `revert`, `deleteSnapshot` | An Ubuntu Server guest from the release's cloud image, configured by cloud-init |
 
 ### Reaching the host
 
@@ -49,10 +50,13 @@ reporting tools as missing.
 | `user`     | the connecting user | User to add to the groups                        |
 | `groups`   | `[libvirt, kvm]`    | Groups the user should be in; only ever added to |
 
-| Release | Packages                                                   |
-| ------- | ---------------------------------------------------------- |
-| 24.04   | `qemu-kvm`, `libvirt-daemon-system`, `virtinst`            |
-| 26.04   | `qemu-system-hwe`, `libvirt-daemon-system-hwe`, `virtinst` |
+| Release | Packages                                                                                  |
+| ------- | ----------------------------------------------------------------------------------------- |
+| 24.04   | `qemu-kvm`, `libvirt-daemon-system`, `virtinst`, `ca-certificates`, `curl`, `genisoimage` |
+| 26.04   | `qemu-system-hwe`, `libvirt-daemon-system-hwe`, `virtinst`, `ca-certificates`, `curl`     |
+
+`curl` fetches cloud images for `vm`. On 24.04, `genisoimage` builds the
+cloud-init seed, since virt-install 4.1.0 can't.
 
 Groups are added with `usermod -aG` and never removed. `@adam/cfgmgmt/user`'s
 `groups` is the user's whole list, so giving it `[libvirt, kvm]` would take the
@@ -87,6 +91,46 @@ the deck defines `default` there and `iso` beside it.
 Before defining a `bridge` or `macvtap` network it reads the host's uplink and
 fails, with the reason, when the mode can't work there. It never changes the
 host's own network: a bridge has to exist before a bridge network can use it.
+
+### `@taylor/libvirt/vm`
+
+| Argument            | Default                 | Description                                                                      |
+| ------------------- | ----------------------- | -------------------------------------------------------------------------------- |
+| `name`              | required                | VM name, also its hostname                                                       |
+| `ensure`            | `present`               | `absent` shuts it down and undefines it with its NVRAM and storage               |
+| `running`           | `true`                  | Keep it running                                                                  |
+| `release`           | `26.04`                 | `24.04` or `26.04`                                                               |
+| `imageUrl`          | cloud-images.ubuntu.com | A mirror's copy; its directory needs `SHA256SUMS` unless `imageSha256` is set    |
+| `imageSha256`       |                         | Pin the image instead of reading `SHA256SUMS`                                    |
+| `pool`              | `default`               | Pool the disk goes in, as `<name>.qcow2`                                         |
+| `diskSize`          | `32G`                   |                                                                                  |
+| `memory`, `vcpus`   | `2048` MiB, `2`         |                                                                                  |
+| `network`           | `default`               | libvirt network to attach to                                                     |
+| `osVariant`         | `ubuntu-lts-latest`     |                                                                                  |
+| `sshAuthorizedKeys` | `[]`                    | Public keys for the `ubuntu` user                                                |
+| `password`          |                         | Password for `ubuntu`, with SSH password logins on; better from a vault          |
+| `packages`          | `[]`                    | More packages; `qemu-guest-agent` is always added                                |
+| `cloudInit`         | `auto`                  | `virt-install` (`--cloud-init`, newer than 4.1.0) or `seed-iso` (a `cidata` ISO) |
+| `waitForIp`         | `true`                  | Wait for the guest agent to report an address                                    |
+| `timeoutSeconds`    | `900`                   | How long to wait                                                                 |
+
+`apply` follows the deck's "Spin up your first VM":
+
+1. Fetch the release's cloud image into `/var/lib/libvirt/cloud-images`, checked
+   against Ubuntu's `SHA256SUMS`; a verified copy is reused.
+2. `qemu-img convert` it into the pool and `qemu-img resize` it.
+3. Write meta-data and user-data: the SSH keys, the optional password, and
+   `qemu-guest-agent`, which the deck installs by hand.
+4. `virt-install --import --boot uefi` with `--cloud-init …,disable=on`, or on
+   24.04 with a `cidata` seed ISO attached as a CD-ROM.
+5. Wait for `virsh domifaddr --source agent` to report an address, which works
+   on a bridged network where libvirt's DHCP leases can't help.
+
+The `state` data has the VM's `state`, `memory`, `vcpus`, `network`, `mac` and
+`ip`. An existing VM is started if it's stopped but never rebuilt: different
+`memory`, `vcpus` or `network` make `check` `non_compliant` and `apply` fail
+with the reason. `snapshot`, `revert` and `deleteSnapshot` take `snapshot`
+(default `clean`) and save the VM's snapshot list.
 
 ### `@taylor/libvirt/uplink`
 
@@ -160,6 +204,18 @@ They use their own behavior names (`ssh-kvm-*`). A virtual behavior keeps the
 arguments a step gave it, so if both workflows shared names, the agent workflow
 would inherit `nodeHost` and its worker would SSH to itself.
 
+### VMs
+
+`@taylor/kvm-vm` (on the worker) and `@taylor/kvm-vm-ssh` create, start or
+remove one VM. Each VM gets its own behavior, `kvm-vm-<name>`.
+
+```bash
+swamp workflow run @taylor/kvm-vm --server wss://10.0.0.5:4000 \
+  --input-file vm.json   # {"name": "ubuntu-server-2604", "network": "host-network",
+                         #  "sshAuthorizedKeys": ["ssh-ed25519 AAAA… me"]}
+swamp data query 'modelName == "kvm-vm-ubuntu-server-2604"' --select content.ip
+```
+
 ## What it runs
 
 On the host, through `ssh` when `nodeHost` is set, and with `sudo -n` where
@@ -180,6 +236,15 @@ noted:
   `networkctl` when netplan can't be read, `systemd-detect-virt`,
   `systemctl is-active docker` and
   `cat /proc/sys/net/bridge/bridge-nf-call-iptables`.
+- `vm`: `sudo virsh` `list`, `dominfo`, `domiflist`, `domifaddr --source agent`;
+  apply adds `uname -m`, `curl` for `SHA256SUMS` and the image,
+  `sudo sha256sum`, `sudo qemu-img convert` and `resize`, `pool-dumpxml`,
+  `pool-refresh`, `mktemp` files for user-data and meta-data,
+  `virt-install --version`, `genisoimage` or `xorriso -as mkisofs` for a seed
+  ISO, `sudo virt-install`, and `start`, `shutdown`, `destroy` and
+  `undefine --nvram --remove-all-storage`. The snapshot methods run
+  `snapshot-create-as`, `snapshot-revert`, `snapshot-delete`, `snapshot-list`
+  and `snapshot-current`.
 
 ## Development
 

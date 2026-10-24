@@ -147,9 +147,13 @@ export function networkXml(name: string, want: NetworkDef): string {
  * Writes text to a new temporary file on the host and returns its path,
  * passing the text as an argument because commands get no stdin.
  */
-export async function writeTemp(s: Session, text: string): Promise<string> {
+export async function writeTemp(
+  s: Session,
+  text: string,
+  suffix = ".xml",
+): Promise<string> {
   const path =
-    check(await s.run("mktemp", ["-t", "libvirt-XXXXXX.xml"]), "mktemp")
+    check(await s.run("mktemp", ["-t", `libvirt-XXXXXX${suffix}`]), "mktemp")
       .stdout;
   check(
     await s.run("sh", ["-c", 'printf "%s" "$1" > "$2"', "sh", text, path]),
