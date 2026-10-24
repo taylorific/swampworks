@@ -1,0 +1,89 @@
+id: be581847-17ec-4417-a5f1-3a24a2f1bca6
+name: "@taylor/kvm-host-apply"
+description: "Set up a KVM host the kvm-training way on a swamp worker labelled role=kvm-host: packages, groups, image and ISO pools, and a libvirt network on the uplink"
+tags: {}
+inputs:
+  properties:
+    mode:
+      type: string
+      enum: [nat, bridge, macvtap, routed]
+      default: bridge
+      description: How guests connect; the uplink step fails if it can't work on the host
+    bridge:
+      type: string
+      default: br0
+      description: The host's Linux bridge, for bridge mode
+    network:
+      type: string
+      default: host-network
+      description: Name of the libvirt network to define
+jobs:
+  - name: kvm-host
+    description: Runs on the KVM host itself, through a swamp worker
+    labels:
+      role: kvm-host
+    affinity: true
+    steps:
+      - name: uplink
+        description: Can guests connect this way on this host?
+        task:
+          type: model_method
+          modelType: "@taylor/libvirt/uplink"
+          modelName: kvm-uplink
+          methodName: check
+          globalArgs:
+            mode: ${{ inputs.mode }}
+        dependsOn: []
+      - name: host
+        description: QEMU, libvirt and virtinst, and the user in libvirt and kvm
+        task:
+          type: model_method
+          modelType: "@taylor/libvirt/host"
+          modelName: kvm-host
+          methodName: apply
+        dependsOn:
+          - step: uplink
+            condition:
+              type: succeeded
+      - name: pool-default
+        description: Disk images in /var/lib/libvirt/images
+        task:
+          type: model_method
+          modelType: "@taylor/libvirt/pool"
+          modelName: kvm-pool-default
+          methodName: apply
+          globalArgs:
+            name: default
+        dependsOn:
+          - step: host
+            condition:
+              type: succeeded
+      - name: pool-iso
+        description: ISOs in /var/lib/libvirt/iso
+        task:
+          type: model_method
+          modelType: "@taylor/libvirt/pool"
+          modelName: kvm-pool-iso
+          methodName: apply
+          globalArgs:
+            name: iso
+        dependsOn:
+          - step: host
+            condition:
+              type: succeeded
+      - name: network
+        description: The libvirt network guests attach to
+        task:
+          type: model_method
+          modelType: "@taylor/libvirt/network"
+          modelName: kvm-network
+          methodName: apply
+          globalArgs:
+            name: ${{ inputs.network }}
+            mode: ${{ inputs.mode }}
+            bridge: ${{ inputs.bridge }}
+        dependsOn:
+          - step: host
+            condition:
+              type: succeeded
+version: 1

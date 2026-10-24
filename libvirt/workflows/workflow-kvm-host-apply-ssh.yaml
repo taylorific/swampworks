@@ -1,0 +1,96 @@
+id: 315b6941-deeb-4f17-a55e-be9b6f50715d
+name: "@taylor/kvm-host-apply-ssh"
+description: "Set up a KVM host the kvm-training way over SSH, with nothing installed on the host: packages, groups, image and ISO pools, and a libvirt network on the uplink"
+tags: {}
+inputs:
+  required: [host]
+  properties:
+    host:
+      type: string
+      description: The KVM host as an ssh destination, e.g. taylor@10.63.45.217 or a name from ~/.ssh/config
+    mode:
+      type: string
+      enum: [nat, bridge, macvtap, routed]
+      default: bridge
+      description: How guests connect; the uplink step fails if it can't work on the host
+    bridge:
+      type: string
+      default: br0
+      description: The host's Linux bridge, for bridge mode
+    network:
+      type: string
+      default: host-network
+      description: Name of the libvirt network to define
+jobs:
+  - name: kvm-host
+    description: Runs where swamp runs, reaching the KVM host over SSH
+    steps:
+      - name: uplink
+        description: Can guests connect this way on this host?
+        task:
+          type: model_method
+          modelType: "@taylor/libvirt/uplink"
+          modelName: ssh-kvm-uplink
+          methodName: check
+          globalArgs:
+            nodeHost: ${{ inputs.host }}
+            mode: ${{ inputs.mode }}
+        dependsOn: []
+      - name: host
+        description: QEMU, libvirt and virtinst, and the user in libvirt and kvm
+        task:
+          type: model_method
+          modelType: "@taylor/libvirt/host"
+          modelName: ssh-kvm-host
+          methodName: apply
+          globalArgs:
+            nodeHost: ${{ inputs.host }}
+        dependsOn:
+          - step: uplink
+            condition:
+              type: succeeded
+      - name: pool-default
+        description: Disk images in /var/lib/libvirt/images
+        task:
+          type: model_method
+          modelType: "@taylor/libvirt/pool"
+          modelName: ssh-kvm-pool-default
+          methodName: apply
+          globalArgs:
+            nodeHost: ${{ inputs.host }}
+            name: default
+        dependsOn:
+          - step: host
+            condition:
+              type: succeeded
+      - name: pool-iso
+        description: ISOs in /var/lib/libvirt/iso
+        task:
+          type: model_method
+          modelType: "@taylor/libvirt/pool"
+          modelName: ssh-kvm-pool-iso
+          methodName: apply
+          globalArgs:
+            nodeHost: ${{ inputs.host }}
+            name: iso
+        dependsOn:
+          - step: host
+            condition:
+              type: succeeded
+      - name: network
+        description: The libvirt network guests attach to
+        task:
+          type: model_method
+          modelType: "@taylor/libvirt/network"
+          modelName: ssh-kvm-network
+          methodName: apply
+          globalArgs:
+            nodeHost: ${{ inputs.host }}
+            name: ${{ inputs.network }}
+            mode: ${{ inputs.mode }}
+            bridge: ${{ inputs.bridge }}
+        dependsOn:
+          - step: host
+            condition:
+              type: succeeded
+version: 1
