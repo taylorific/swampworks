@@ -66,6 +66,8 @@ Deno.test("host check lists what's missing and changes nothing", async () => {
     "install qemu-system-hwe",
     "install libvirt-daemon-system-hwe",
     "install virtinst",
+    "install ca-certificates",
+    "install curl",
     "add taylor to libvirt",
     "add taylor to kvm",
   ]);
@@ -88,7 +90,7 @@ Deno.test("host apply installs, adds groups with -aG, and re-reads", async () =>
     [`${DPKG} *`]: installed,
     "id -nG taylor": grouped,
     "sudo -n apt-get update -q": ok(),
-    "sudo -n env DEBIAN_FRONTEND=noninteractive apt-get install -y -q qemu-system-hwe libvirt-daemon-system-hwe virtinst":
+    "sudo -n env DEBIAN_FRONTEND=noninteractive apt-get install -y -q qemu-system-hwe libvirt-daemon-system-hwe virtinst ca-certificates curl":
       ok(),
     "sudo -n usermod -aG libvirt taylor": ok(),
     "sudo -n usermod -aG kvm taylor": ok(),

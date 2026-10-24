@@ -1,0 +1,64 @@
+id: 802c314d-0f8f-4e99-853b-68f45c6509da
+name: "@taylor/kvm-vm-ssh"
+description: "Create, start or remove an Ubuntu Server VM the kvm-training way over SSH, with nothing installed on the host"
+tags: {}
+inputs:
+  required: [host, name]
+  properties:
+    host:
+      type: string
+      description: The KVM host as an ssh destination, e.g. taylor@10.63.45.217
+    name:
+      type: string
+      description: VM name, also its hostname
+    network:
+      type: string
+      default: host-network
+      description: libvirt network to attach to
+    release:
+      type: string
+      enum: ["24.04", "26.04"]
+      default: "26.04"
+    memory:
+      type: integer
+      default: 2048
+      description: Memory in MiB
+    vcpus:
+      type: integer
+      default: 2
+    diskSize:
+      type: string
+      default: 32G
+    sshAuthorizedKeys:
+      type: array
+      items:
+        type: string
+      default: []
+      description: Public keys for the ubuntu user
+    ensure:
+      type: string
+      enum: [present, absent]
+      default: present
+jobs:
+  - name: vm
+    description: Runs where swamp runs, reaching the KVM host over SSH
+    steps:
+      - name: vm
+        description: The VM, created from the cloud image and waited on until it has an address
+        task:
+          type: model_method
+          modelType: "@taylor/libvirt/vm"
+          modelName: ssh-kvm-vm-${{ inputs.name }}
+          methodName: apply
+          globalArgs:
+            nodeHost: ${{ inputs.host }}
+            name: ${{ inputs.name }}
+            network: ${{ inputs.network }}
+            release: ${{ inputs.release }}
+            memory: ${{ inputs.memory }}
+            vcpus: ${{ inputs.vcpus }}
+            diskSize: ${{ inputs.diskSize }}
+            sshAuthorizedKeys: ${{ inputs.sshAuthorizedKeys }}
+            ensure: ${{ inputs.ensure }}
+        dependsOn: []
+version: 1

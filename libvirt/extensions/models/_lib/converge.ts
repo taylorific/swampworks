@@ -135,3 +135,25 @@ export async function converge<G extends Connection, T>(
     await s.close();
   }
 }
+
+/**
+ * Runs an action that isn't check or apply, such as taking a snapshot, with
+ * the same connection handling: a dropped SSH connection fails it.
+ */
+export async function withSession<G extends Connection, R>(
+  g: G,
+  seams: Seams,
+  fn: (s: Session) => Promise<R>,
+): Promise<R> {
+  const s = await openSession(g, seams._run ?? commandRunner());
+  try {
+    const r = await fn(s);
+    s.assertConnected();
+    return r;
+  } catch (err) {
+    s.assertConnected();
+    throw err;
+  } finally {
+    await s.close();
+  }
+}
