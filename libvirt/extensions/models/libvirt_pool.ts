@@ -6,7 +6,7 @@ import {
   type Seams,
   StateBaseSchema,
 } from "./_lib/converge.ts";
-import { check, ConnectionSchema } from "./_lib/runner.ts";
+import { check, connectionChecks, ConnectionSchema } from "./_lib/runner.ts";
 import {
   listNames,
   parseInfo,
@@ -159,6 +159,7 @@ export const model = {
   type: "@taylor/libvirt/pool",
   version: "2026.10.24.2",
   globalArguments: GlobalArgsSchema,
+  checks: connectionChecks(["check", "apply"]),
   resources: {
     state: {
       description:

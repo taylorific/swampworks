@@ -144,8 +144,8 @@ export function networkXml(name: string, want: NetworkDef): string {
 }
 
 /**
- * Writes text to a new temporary file on the host and returns its path,
- * passing the text as an argument because commands get no stdin.
+ * Writes text to a new temporary file on the host, readable only by the
+ * connecting user, and returns its path.
  */
 export async function writeTemp(
   s: Session,
@@ -155,8 +155,10 @@ export async function writeTemp(
   const path =
     check(await s.run("mktemp", ["-t", `libvirt-XXXXXX${suffix}`]), "mktemp")
       .stdout;
+  // Over stdin, so the content (cloud-init user-data may hold a password)
+  // never appears in a command line. mktemp makes the file private.
   check(
-    await s.run("sh", ["-c", 'printf "%s" "$1" > "$2"', "sh", text, path]),
+    await s.run("sh", ["-c", 'cat > "$1"', "sh", path], text),
     `Writing ${path}`,
   );
   return path;

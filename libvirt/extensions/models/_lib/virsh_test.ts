@@ -49,9 +49,14 @@ Deno.test("networkXml round-trips through parseNetworkXml for every mode", () =>
       mode: "nat",
       bridge: "virbr1",
       interface: null,
-      address: "192.168.123.1/24",
+      address: "198.51.100.1/24",
     },
-    { mode: "routed", bridge: null, interface: null, address: "10.10.0.1/24" },
+    {
+      mode: "routed",
+      bridge: null,
+      interface: null,
+      address: "198.51.100.1/24",
+    },
     { mode: "bridge", bridge: "br0", interface: null, address: null },
     { mode: "macvtap", bridge: null, interface: "eno1", address: null },
   ] as const;
@@ -65,8 +70,8 @@ Deno.test("dhcpRange skips the host's own address", () => {
     start: "192.168.122.2",
     end: "192.168.122.254",
   });
-  assertEquals(dhcpRange("10.0.0.254/24"), {
-    start: "10.0.0.1",
-    end: "10.0.0.253",
+  assertEquals(dhcpRange("203.0.113.254/24"), {
+    start: "203.0.113.1",
+    end: "203.0.113.253",
   });
 });

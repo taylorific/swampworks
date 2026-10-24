@@ -7,7 +7,7 @@ inputs:
   properties:
     host:
       type: string
-      description: The KVM host as an ssh destination, e.g. taylor@10.63.45.217 or a name from ~/.ssh/config
+      description: The KVM host as an ssh destination, e.g. admin@kvm1.example.com or a name from ~/.ssh/config
     mode:
       type: string
       enum: [nat, bridge, macvtap, routed]

@@ -7,7 +7,7 @@ import {
   StateBaseSchema,
 } from "./_lib/converge.ts";
 import { adviseNetwork, MODES, readNetworkFacts } from "./_lib/network.ts";
-import { check, ConnectionSchema } from "./_lib/runner.ts";
+import { check, connectionChecks, ConnectionSchema } from "./_lib/runner.ts";
 import {
   listNames,
   type NetworkDef,
@@ -40,7 +40,7 @@ const GlobalArgsSchema = ConnectionSchema.extend({
     "macvtap mode: the wired interface guests share, e.g. eno1",
   ),
   address: z.string().regex(/^\d+\.\d+\.\d+\.\d+\/\d+$/).optional().describe(
-    "nat and routed: the host's address on the guest subnet, e.g. 192.168.123.1/24; DHCP serves the rest",
+    "nat and routed: the host's address on the guest subnet, e.g. 198.51.100.1/24; DHCP serves the rest",
   ),
   ensure: z.enum(["present", "absent"]).default("present"),
   autostart: z.boolean().default(true),
@@ -226,6 +226,7 @@ export const model = {
   type: "@taylor/libvirt/network",
   version: "2026.10.24.2",
   globalArguments: GlobalArgsSchema,
+  checks: connectionChecks(["check", "apply"]),
   resources: {
     state: {
       description:

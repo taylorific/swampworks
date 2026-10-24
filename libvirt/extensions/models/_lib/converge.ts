@@ -33,7 +33,8 @@ export const StateBaseSchema = z.object({
   checkedAt: z.string(),
 });
 
-interface Logger {
+/** The logger swamp hands a method. */
+export interface Logger {
   info(msg: string, props?: Record<string, unknown>): void;
   warn(msg: string, props?: Record<string, unknown>): void;
 }
@@ -62,8 +63,14 @@ export interface Resource<G, T> {
   read(s: Session, g: G): Promise<T>;
   /** What would have to change; empty when the host already matches. */
   diff(current: T, g: G): string[];
-  /** Makes the changes. */
-  apply(s: Session, g: G, current: T, changes: string[]): Promise<void>;
+  /** Makes the changes, logging progress through `log` when it's slow. */
+  apply(
+    s: Session,
+    g: G,
+    current: T,
+    changes: string[],
+    log: Logger,
+  ): Promise<void>;
   /** The resource's own fields for the state data. */
   details(current: T): Record<string, unknown>;
   /** Lines worth logging after a check or apply. */
@@ -96,7 +103,7 @@ export async function converge<G extends Connection, T>(
       for (const c of changes) {
         context.logger.info("{label}: {change}", { label, change: c });
       }
-      await resource.apply(s, g, current, changes);
+      await resource.apply(s, g, current, changes, context.logger);
       current = await resource.read(s, g);
       const left = resource.diff(current, g);
       if (left.length) {
