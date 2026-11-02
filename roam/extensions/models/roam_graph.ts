@@ -88,6 +88,33 @@ const PublishArgsSchema = z.object({
 });
 type PublishArgs = z.infer<typeof PublishArgsSchema>;
 
+const CodeBlockSchema = z.object({
+  title: z.string().min(1).describe(
+    "Text of the collapsed block that holds the code block",
+  ),
+  content: z.string().describe("The code block's text"),
+  language: z.string().regex(/^[a-z0-9+#-]*$/i).default("").describe(
+    "Code block language, e.g. markdown (empty for plain text)",
+  ),
+});
+
+const PostArgsSchema = z.object({
+  date: IsoDate.describe("Daily note to write on (YYYY-MM-DD)"),
+  heading: z.string().min(1).describe(
+    "Text of the top-level block everything goes under; an existing top-level block on that note with the same text (ignoring ** and a trailing ':') is the same post",
+  ),
+  markdown: z.string().default("").describe(
+    "An outline of '- ' bullets, nested with indentation, written under the heading",
+  ),
+  codeBlocks: z.array(CodeBlockSchema).default([]).describe(
+    "Long text such as logs, each written after the outline as a collapsed block whose one child is a code block",
+  ),
+  ifExists: z.enum(["skip", "replace", "fail"]).default("skip").describe(
+    "What to do when the note already has this heading: leave it, replace its contents in place, or fail",
+  ),
+});
+type PostArgs = z.infer<typeof PostArgsSchema>;
+
 const DaySchema = z.object({
   date: z.string(),
   title: z.string(),
@@ -130,6 +157,19 @@ const SummarySchema = z.object({
   blockUid: z.string(),
   markdown: z.string(),
   publishedAt: z.string(),
+});
+
+const PostSchema = z.object({
+  date: z.string(),
+  heading: z.string(),
+  action: z.enum(["created", "replaced", "skipped"]),
+  pageUid: z.string(),
+  blockUid: z.string(),
+  markdown: z.string(),
+  codeBlocks: z.array(
+    z.object({ title: z.string(), language: z.string(), chars: z.number() }),
+  ),
+  postedAt: z.string(),
 });
 
 /** A Roam block with its children in order. */
@@ -228,10 +268,16 @@ export class RoamClient {
         if (m) this.#base = m[0];
       }
       const text = await res.text();
-      if ((res.status === 429 || res.status >= 500) && attempt < 4) {
+      // Roam allows 100 requests a minute per graph and counts each action
+      // in a batch, so a 429 waits out the minute rather than seconds.
+      if ((res.status === 429 || res.status >= 500) && attempt < 6) {
         const retryAfter = Number(res.headers.get("Retry-After"));
         await this.sleep(
-          retryAfter > 0 ? retryAfter * 1000 : 2000 * 2 ** attempt,
+          retryAfter > 0
+            ? retryAfter * 1000
+            : res.status === 429
+            ? Math.min(60000, 15000 * 2 ** attempt)
+            : 2000 * 2 ** attempt,
         );
         continue;
       }
@@ -693,14 +739,51 @@ export function createActions(
   });
 }
 
+/**
+ * create-block actions for collapsed blocks that each hold one code block.
+ * Triple backticks inside the text would end the code block early, so they
+ * become triple quotes.
+ */
+export function codeBlockActions(
+  parentUid: string,
+  blocks: { title: string; content: string; language: string }[],
+): Record<string, unknown>[] {
+  return blocks.flatMap((b) => {
+    const uid = newUid();
+    const body = b.content.replace(/\r/g, "").replace(/```/g, "'''")
+      .replace(/\n+$/, "");
+    return [
+      {
+        action: "create-block",
+        location: { "parent-uid": parentUid, order: "last" },
+        block: { uid, string: b.title, open: false },
+      },
+      {
+        action: "create-block",
+        location: { "parent-uid": uid, order: "last" },
+        block: {
+          uid: newUid(),
+          string: `\`\`\`${b.language}\n${body}\n\`\`\``,
+        },
+      },
+    ];
+  });
+}
+
+/** "Bitbucket Week Ending October 30, 2026" → "bitbucket-week-ending-october-30-2026". */
+export function slug(s: string): string {
+  return s.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "")
+    .slice(0, 80);
+}
+
 async function writeBatched(
   client: RoamClient,
   actions: Record<string, unknown>[],
 ): Promise<void> {
-  for (let i = 0; i < actions.length; i += 100) {
+  for (let i = 0; i < actions.length; i += 50) {
     await client.write({
       action: "batch-actions",
-      actions: actions.slice(i, i + 100),
+      actions: actions.slice(i, i + 50),
     });
   }
 }
@@ -735,7 +818,7 @@ function dailiesText(days: { date: string; title: string; entries: string }[]) {
 /** The `@taylor/roam/graph` swamp model type. */
 export const model = {
   type: "@taylor/roam/graph",
-  version: "2026.10.22.1",
+  version: "2026.11.02.1",
   globalArguments: GlobalArgsSchema,
   upgrades: [
     {
@@ -746,6 +829,11 @@ export const model = {
     {
       toVersion: "2026.10.22.1",
       description: "Relicenses under AGPL-3.0-or-later; no settings changed",
+      upgradeAttributes: (old: Record<string, unknown>) => old,
+    },
+    {
+      toVersion: "2026.11.02.1",
+      description: "Adds the post method; no settings changed",
       upgradeAttributes: (old: Record<string, unknown>) => old,
     },
   ],
@@ -768,6 +856,13 @@ export const model = {
       description:
         "A published summary, one instance per period (summary-week-2026-10-02, summary-month-2026-09, ...)",
       schema: SummarySchema,
+      lifetime: "infinite",
+      garbageCollection: 5,
+    },
+    post: {
+      description:
+        "An outline written by post, one instance per note and heading (post-2026-11-02-<heading>)",
+      schema: PostSchema,
       lifetime: "infinite",
       garbageCollection: 5,
     },
@@ -1033,6 +1128,126 @@ export const model = {
             blockUid,
             markdown: args.markdown,
             publishedAt: new Date().toISOString(),
+          },
+        );
+        return { dataHandles: [handle] };
+      },
+    },
+    post: {
+      description:
+        "Write an outline, and optionally collapsed code blocks, under a heading on a daily note, and store it as data",
+      arguments: PostArgsSchema,
+      execute: async (args: PostArgs & TestHooks, context: Context) => {
+        const g = context.globalArgs;
+        const client = new RoamClient(
+          g.token,
+          g.graph,
+          args._fetch,
+          args._sleep,
+        );
+        const outline = parseOutline(args.markdown);
+        if (!outline.length && !args.codeBlocks.length) {
+          throw new Error("Nothing to post: no bullets and no code blocks");
+        }
+        const heading = args.heading.trim();
+        const pageUid = dailyUid(args.date);
+        const page = (await client.pullMany([pageUid])).get(pageUid);
+        const want = normalizeHeading(heading);
+        const existing = page?.children.find((b) =>
+          normalizeHeading(b.string) === want
+        );
+        const content = () => [
+          ...createActions(blockUid, outline),
+          ...codeBlockActions(blockUid, args.codeBlocks),
+        ];
+        let action: "created" | "replaced" | "skipped";
+        let blockUid: string;
+
+        if (existing && args.ifExists === "fail") {
+          throw new Error(
+            `${heading} already exists on ${dailyTitle(args.date)}`,
+          );
+        }
+        if (existing && args.ifExists === "skip") {
+          action = "skipped";
+          blockUid = existing.uid;
+          context.logger.warn(
+            "{heading} already exists on {page}; left it as is (ifExists=skip)",
+            { heading, page: dailyTitle(args.date) },
+          );
+        } else if (existing) {
+          action = "replaced";
+          blockUid = existing.uid;
+          try {
+            await writeBatched(client, [
+              ...existing.children.map((c) => ({
+                action: "delete-block",
+                block: { uid: c.uid },
+              })),
+              ...content(),
+            ]);
+          } catch (e) {
+            throw new Error(
+              `Replacing ${heading} failed part-way, so it may be incomplete; rerun with ifExists=replace. ${
+                (e as Error).message
+              }`,
+            );
+          }
+          context.logger.info("Replaced {heading} on {page}", {
+            heading,
+            page: dailyTitle(args.date),
+          });
+        } else {
+          action = "created";
+          blockUid = newUid();
+          try {
+            await writeBatched(client, [
+              ...(page ? [] : [{
+                action: "create-page",
+                page: { uid: pageUid, title: dailyTitle(args.date) },
+              }]),
+              {
+                action: "create-block",
+                location: { "parent-uid": pageUid, order: "last" },
+                block: { uid: blockUid, string: heading },
+              },
+              ...content(),
+            ]);
+          } catch (e) {
+            const removed = await client.write({
+              action: "delete-block",
+              block: { uid: blockUid },
+            }).then(() => true, () => false);
+            throw new Error(
+              `Writing ${heading} failed part-way${
+                removed
+                  ? "; removed the partial post"
+                  : `, and the partial post (block ${blockUid}) could not be removed; rerun with ifExists=replace`
+              }. ${(e as Error).message}`,
+            );
+          }
+          context.logger.info("Wrote {heading} to {page}", {
+            heading,
+            page: dailyTitle(args.date),
+          });
+        }
+
+        const handle = await context.writeResource(
+          "post",
+          `post-${args.date}-${slug(heading)}`,
+          {
+            date: args.date,
+            heading,
+            action,
+            pageUid,
+            blockUid,
+            markdown: args.markdown,
+            codeBlocks: args.codeBlocks.map((b) => ({
+              title: b.title,
+              language: b.language,
+              chars: b.content.length,
+            })),
+            postedAt: new Date().toISOString(),
           },
         );
         return { dataHandles: [handle] };

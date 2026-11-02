@@ -105,6 +105,38 @@ swamp data query 'modelName == "roam" && name == "source"' --select content
 `roam.dailies` reads the section from every daily note in a date range
 (`--input start=2026-09-01 --input end=2026-09-30`) without building a prompt.
 
+### Posting other outlines
+
+`roam.post` writes any outline under a heading of your choosing on a daily
+note, for reports that aren't one of the reviews above. Long text such as a log
+goes in `codeBlocks`: each becomes a collapsed block whose one child is a code
+block, so a week's log is one block instead of hundreds.
+
+```yaml
+# post.yaml
+date: "2026-11-02"
+heading: Build Report Week Ending October 30, 2026
+markdown: |
+  - **Highlights**
+    - Shipped the thing
+codeBlocks:
+  - title: Full log
+    language: markdown
+    content: |
+      ## repo
+      - 2026-10-30 abc123 Someone: a commit
+```
+
+```sh
+swamp model method run roam post --input-file post.yaml
+```
+
+The heading is matched against the note's top-level blocks (ignoring `**` and a
+trailing colon), and `ifExists` works as it does for `publish`. A heading that
+starts "Week Ending" or "Monthly Rollup" would be picked up by the rollups, so
+give posts their own prefix. Each post is stored as data
+(`post-2026-11-02-build-report-week-ending-october-30-2026`).
+
 ## Privacy
 
 Only the children of the `Activities` block (for weeklies) and the summary
