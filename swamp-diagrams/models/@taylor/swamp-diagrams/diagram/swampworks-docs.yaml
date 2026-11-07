@@ -1,0 +1,21 @@
+type: '@taylor/swamp-diagrams/diagram'
+typeVersion: 2026.11.06.1
+id: d039b8b7-04c6-4443-9dd2-1f0fab06dace
+name: swampworks-docs
+version: 1
+tags: {}
+globalArguments:
+  theme: auto
+  direction: TD
+  render: none
+  outputDir: ''
+  embedIn: ../docs
+  copyFiles:
+    - mmd
+    - md
+    - image
+  registryUrl: 'https://swamp-club.com'
+  dockerPath: docker
+  mermaidImage: >-
+    minlag/mermaid-cli:11.12.0@sha256:bad64c9d9ad917c8dfbe9d9e9c162b96f6615ff019b37058638d16eb27ce7783
+methods: {}
