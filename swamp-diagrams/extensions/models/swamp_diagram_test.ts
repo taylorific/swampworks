@@ -5,7 +5,12 @@ import {
   assertStringIncludes,
 } from "jsr:@std/assert@1.0.13";
 import { join } from "jsr:@std/path@1.0.8";
-import { findWorkflows, model, slug } from "./swamp_diagram.ts";
+import {
+  dockerAvailable,
+  findWorkflows,
+  model,
+  slug,
+} from "./swamp_diagram.ts";
 import {
   collapse,
   parseTransitions,
@@ -446,6 +451,77 @@ Deno.test("embedIn writes the diagram into marked Markdown blocks", async () => 
     assertEquals(resources["workflow-build-and-ship"].embeddedIn, [
       "docs/page.md",
     ]);
+  } finally {
+    await Deno.remove(dir, { recursive: true });
+  }
+});
+
+Deno.test("docker check passes without render and explains a missing CLI", async () => {
+  assertEquals(
+    await dockerAvailable({ render: "none", dockerPath: "nope" }),
+    { pass: true },
+  );
+  const r = await dockerAvailable({
+    render: "svg",
+    dockerPath: "/nonexistent/docker-for-swamp-diagrams-test",
+  });
+  assertEquals(r.pass, false);
+  assertStringIncludes(r.errors![0], "was not found");
+  assertStringIncludes(r.errors![0], "render=none");
+});
+
+Deno.test("dockerPath and mermaidImage are validated", () => {
+  const g = model.globalArguments;
+  assert(g.safeParse({}).success);
+  assert(!g.safeParse({ dockerPath: "--rm" }).success);
+  assert(!g.safeParse({ dockerPath: "docker run" }).success);
+  assert(!g.safeParse({ mermaidImage: "img; rm -rf /" }).success);
+  assert(
+    g.safeParse({ mermaidImage: "ghcr.io/mermaid-js/mermaid-cli:11.12.0" })
+      .success,
+  );
+});
+
+Deno.test("unparseable workflow files are logged, not silently skipped", async () => {
+  const dir = await Deno.makeTempDir();
+  try {
+    await Deno.mkdir(join(dir, "workflows"));
+    await Deno.writeTextFile(join(dir, "workflows/good.yaml"), WORKFLOW);
+    await Deno.writeTextFile(join(dir, "workflows/broken.yaml"), "name: x\n");
+    const warned: string[] = [];
+    const found = await findWorkflows(dir, { name: "", path: "" }, {
+      info() {},
+      warning(_m: string, p?: Record<string, unknown>) {
+        warned.push(String(p?.file));
+      },
+    });
+    assertEquals(found.length, 1);
+    assertEquals(warned, ["workflows/broken.yaml"]);
+  } finally {
+    await Deno.remove(dir, { recursive: true });
+  }
+});
+
+Deno.test("workflows whose names share a diagram name are refused", async () => {
+  const dir = await Deno.makeTempDir();
+  try {
+    await Deno.mkdir(join(dir, "workflows"));
+    await Deno.writeTextFile(join(dir, "workflows/a.yaml"), WORKFLOW);
+    await Deno.writeTextFile(
+      join(dir, "workflows/b.yaml"),
+      WORKFLOW.replace("name: build-and-ship", "name: build_and_ship"),
+    );
+    const { ctx } = fakeContext(dir);
+    await assertRejects(
+      () =>
+        model.methods.workflow.execute(
+          { name: "", path: "", dir: "", title: "" },
+          // deno-lint-ignore no-explicit-any
+          ctx as any,
+        ),
+      Error,
+      "would both be drawn as workflow-build-and-ship",
+    );
   } finally {
     await Deno.remove(dir, { recursive: true });
   }
