@@ -510,10 +510,10 @@ export async function fetchDescription(
   return { url, description: body.description ?? "" };
 }
 
-/** The @taylor/mermaid/diagram behavior. */
+/** The @taylor/swamp-diagrams/diagram behavior. */
 export const model = {
   type: "@taylor/swamp-diagrams/diagram",
-  version: "2026.11.06.3",
+  version: "2026.11.07.1",
   globalArguments: GlobalArgsSchema,
   upgrades: [
     {
@@ -526,6 +526,12 @@ export const model = {
       toVersion: "2026.11.06.3",
       description:
         "Adds format svg, now the default: a light and dark SVG pair with a fixed, hand-drawn-style layout (set format=mermaid to keep Mermaid). stateMachine can read transitions from a file (path) and draw routine steps back as normal arrows (backEdges=normal). Also ignores swamp-diagram markers inside code blocks and stops Mermaid labels clipping on GitHub; existing settings are kept",
+      upgradeAttributes: (old: Record<string, unknown>) => old,
+    },
+    {
+      toVersion: "2026.11.07.1",
+      description:
+        "Updates the registry description to cover the SVG output; no behavior or settings changed",
       upgradeAttributes: (old: Record<string, unknown>) => old,
     },
   ],
