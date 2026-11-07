@@ -1,7 +1,7 @@
 # Diagram legend
 
-Every diagram under `docs/architecture` is drawn from the source by the
-[@taylor/swamp-diagrams](../../swamp-diagrams/) extension, so shape and colour
+Every diagram in an extension's `docs/` folder in this repository is drawn from
+the source by the [@taylor/swamp-diagrams](../) extension, so shape and colour
 mean the same thing everywhere:
 
 |                     | Meaning                                                                                  |

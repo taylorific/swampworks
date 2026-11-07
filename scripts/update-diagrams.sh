@@ -1,7 +1,8 @@
 #!/bin/sh
-# Redraw every diagram in docs/ from the workflows and state machines it shows.
-# Each diagram replaces the code block between its <!-- swamp-diagram: name -->
-# and <!-- /swamp-diagram --> markers; the prose around them is untouched.
+# Redraw the diagrams in every extension's docs/ folder from the workflows and
+# state machines they show. Each diagram replaces the code block between its
+# <!-- swamp-diagram: name --> and <!-- /swamp-diagram --> markers; the prose
+# around them is untouched.
 set -eu
 cd "$(dirname "$0")/../swamp-diagrams"
 

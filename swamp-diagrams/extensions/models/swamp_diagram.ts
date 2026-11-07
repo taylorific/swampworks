@@ -1,6 +1,12 @@
 import { z } from "npm:zod@4";
 import { join, relative, resolve } from "jsr:@std/path@1.0.8";
-import { background, embed, type Theme, toMarkdown } from "./_lib/mermaid.ts";
+import {
+  background,
+  embed,
+  hasBlock,
+  type Theme,
+  toMarkdown,
+} from "./_lib/mermaid.ts";
 import {
   parseTransitions,
   renderStateMachine,
@@ -324,7 +330,7 @@ async function save(
       const text = await Deno.readTextFile(path);
       const next = embed(text, instance, mermaid);
       if (next === text) {
-        if (text.includes(`swamp-diagram: ${instance}`)) {
+        if (hasBlock(text, instance)) {
           embeddedIn.push(relative(context.repoDir, path));
         }
         continue;
@@ -460,13 +466,19 @@ export async function fetchDescription(
 /** The @taylor/mermaid/diagram behavior. */
 export const model = {
   type: "@taylor/swamp-diagrams/diagram",
-  version: "2026.11.06.2",
+  version: "2026.11.06.3",
   globalArguments: GlobalArgsSchema,
   upgrades: [
     {
       toVersion: "2026.11.06.2",
       description:
         "Validates dockerPath and mermaidImage, checks Docker before rendering, and reports skipped and clashing workflows; no settings changed",
+      upgradeAttributes: (old: Record<string, unknown>) => old,
+    },
+    {
+      toVersion: "2026.11.06.3",
+      description:
+        "Ignores swamp-diagram markers inside code blocks, and stops labels clipping on GitHub (no custom font or bold, more padding); no settings changed",
       upgradeAttributes: (old: Record<string, unknown>) => old,
     },
   ],
