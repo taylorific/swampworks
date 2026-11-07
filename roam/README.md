@@ -152,6 +152,14 @@ credentials out of it.
 
 The tests run every method against an in-memory fake of the Roam API.
 
+## Diagrams
+
+Diagrams of how it works, drawn from the source by
+[@taylor/swamp-diagrams](https://github.com/taylorific/swampworks/tree/main/swamp-diagrams):
+
+- [@taylor/roam/graph](https://github.com/taylorific/swampworks/blob/main/roam/docs/graph.md)
+- [@taylor/roam-review](https://github.com/taylorific/swampworks/blob/main/roam/docs/roam-review.md)
+
 ## License
 
 AGPL-3.0-or-later with the Swamp Extension and Definition Exception; see

@@ -396,6 +396,14 @@ GET    /v1/security/realms/active as each active user              # does the de
 ~/.swamp/deno/deno test --no-config --allow-all extensions/
 ```
 
+## Diagrams
+
+Diagrams of how it works, drawn from the source by
+[@taylor/swamp-diagrams](https://github.com/taylorific/swampworks/tree/main/swamp-diagrams):
+
+- [@taylor/nexus/config](https://github.com/taylorific/swampworks/blob/main/nexus/docs/config.md)
+- [@taylor/nexus/instance](https://github.com/taylorific/swampworks/blob/main/nexus/docs/instance.md)
+
 ## License
 
 AGPL-3.0-or-later with the Swamp Extension and Definition Exception; see

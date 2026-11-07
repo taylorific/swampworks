@@ -82,6 +82,10 @@ const SIDE_GAP = 150; // from a box to the failure box beside it
 const NOTE_GAP = 16;
 const ENTRY = 42; // length of an entry or exit arrow
 const LOOP_ROOM = 100; // width a loop arc takes beside its box
+// Lane arrows leave a box a little below its middle and enter a little above,
+// so one leaving and one arriving at the same box don't overlap.
+const LANE_OUT = 6;
+const LANE_IN = -6;
 
 /** Width of `text` at `size`, in the monospace font. */
 export function textWidth(text: string, size: number): number {
@@ -205,13 +209,18 @@ function layoutGroup(
   const inner = edges.filter((e) => ids.has(e.from) && ids.has(e.to));
   const forward = inner.filter((e) => !e.back && e.from !== e.to);
 
-  // A box reached only by failure arrows sits beside the box it fails from.
+  // A box reached only by failure arrows sits beside the box it fails from,
+  // and so does a detour: a box entered from one place that only ever goes
+  // back (serve, then stop).
   const side = new Map<string, string>();
   for (const n of group.nodes) {
     const into = forward.filter((e) => e.to === n.id);
-    if (into.length > 0 && into.every((e) => e.role === "fail")) {
-      side.set(n.id, into[0].from);
-    }
+    if (into.length === 0) continue;
+    const failure = into.every((e) => e.role === "fail");
+    const detour = new Set(into.map((e) => e.from)).size === 1 &&
+      !forward.some((e) => e.from === n.id) &&
+      inner.some((e) => e.back && e.from === n.id);
+    if (failure || detour) side.set(n.id, into[0].from);
   }
   const main = group.nodes.filter((n) => !side.has(n.id));
 
@@ -276,13 +285,12 @@ function layoutGroup(
     });
   }
 
-  // Notes go left of boxes that have something on their right: a failure
-  // box, or a retry arriving from the right.
+  // Boxes with a failure or detour box beside them keep their note on the
+  // left; renderSvg moves more once it knows which arrows use the right lane.
   for (const b of boxes.values()) {
-    if (b.noteSide === "below") continue;
-    const crowded = [...side.values()].includes(b.node.id) ||
-      inner.some((e) => e.back && e.to === b.node.id);
-    if (crowded) b.noteSide = "left";
+    if (b.noteSide === "right" && [...side.values()].includes(b.node.id)) {
+      b.noteSide = "left";
+    }
   }
   const last = Math.max(...[...boxes.values()].map((b) => b.y));
   const below = [...boxes.values()].some((b) =>
@@ -374,14 +382,38 @@ export function renderSvg(graph: Graph, mode: "dark" | "light"): string {
     top = bottom + 70;
   }
 
+  const boxList = [...boxes.values()];
+  // Arrows that can't go straight down or across use the lane on the right:
+  // steps back, and forward arrows that would cross boxes in between.
+  const spans = (s: Box, t: Box) =>
+    boxList.some((b) =>
+      b.y > s.y + 1 && b.y < t.y - 1 && Math.abs(b.x - s.x) < b.w
+    );
+  const usesLane = (e: GraphEdge) => {
+    const s = boxes.get(e.from), t = boxes.get(e.to);
+    if (!s || !t || Math.abs(s.y - t.y) < 1) return false;
+    if (e.back || t.y < s.y) return !(s.x - s.w / 2 > t.x + t.w / 2);
+    return spans(s, t);
+  };
+  // Their horizontal ends would cross a note on the right, so those boxes,
+  // and any box a retry curves into, keep their note on the left.
+  for (const e of graph.edges) {
+    const s = boxes.get(e.from), t = boxes.get(e.to);
+    if (!s || !t) continue;
+    if (usesLane(e)) {
+      for (const b of [s, t]) if (b.noteSide === "right") b.noteSide = "left";
+    } else if ((e.back || t.y < s.y) && t.noteSide === "right") {
+      t.noteSide = "left";
+    }
+  }
+
   // Edges.
   const byPair = (a: string, b: string) =>
     graph.edges.filter((e) =>
       (e.from === a && e.to === b) || (e.from === b && e.to === a)
     );
   let rightLane = 0;
-  let leftLane = 0;
-  const boxList = [...boxes.values()];
+  const fanLabels = new Set<string>();
   const extentBetween = (y1: number, y2: number, side: "left" | "right") => {
     const lo = Math.min(y1, y2), hi = Math.max(y1, y2);
     const inRange = boxList.filter((b) => b.y >= lo - 1 && b.y <= hi + 1);
@@ -472,7 +504,9 @@ export function renderSvg(graph: Graph, mode: "dark" | "light"): string {
         const lane = extentBetween(s.y, t.y, "right") + 30 + rightLane++ * 18;
         const x1 = s.x + s.w / 2, x2 = t.x + t.w / 2;
         c.path(
-          `M${r(x1)},${r(s.y)} H${r(lane)} V${r(t.y)} H${r(x2 + 1)}`,
+          `M${r(x1)},${r(s.y + LANE_OUT)} H${r(lane)} V${r(t.y + LANE_IN)} H${
+            r(x2 + 1)
+          }`,
           e.role,
           [[x1, s.y], [lane, s.y], [lane, t.y]],
         );
@@ -481,19 +515,18 @@ export function renderSvg(graph: Graph, mode: "dark" | "light"): string {
       continue;
     }
 
-    const spansRows = boxList.some((b) =>
-      b.y > s.y + 1 && b.y < t.y - 1 && Math.abs(b.x - s.x) < b.w
-    );
-    if (spansRows) {
-      // Skips boxes in between: down a lane on the left.
-      const lane = extentBetween(s.y, t.y, "left") - 30 - leftLane++ * 18;
-      const x1 = s.x - s.w / 2, x2 = t.x - t.w / 2;
+    if (spans(s, t)) {
+      // Skips boxes in between: down the lane on the right.
+      const lane = extentBetween(s.y, t.y, "right") + 30 + rightLane++ * 18;
+      const x1 = s.x + s.w / 2, x2 = t.x + t.w / 2;
       c.path(
-        `M${r(x1)},${r(s.y)} H${r(lane)} V${r(t.y)} H${r(x2 - 1)}`,
+        `M${r(x1)},${r(s.y + LANE_OUT)} H${r(lane)} V${r(t.y + LANE_IN)} H${
+          r(x2 + 1)
+        }`,
         e.role,
         [[x1, s.y], [lane, s.y], [lane, t.y]],
       );
-      c.edgeLabel(lane - 8, (s.y + t.y) / 2, label, e.role, "end");
+      c.edgeLabel(lane + 8, (s.y + t.y) / 2, label, e.role);
       continue;
     }
 
@@ -501,7 +534,11 @@ export function renderSvg(graph: Graph, mode: "dark" | "light"): string {
     const y2 = t.y - BOX_H / 2;
     if (Math.abs(s.x - t.x) < 1) {
       c.path(`M${r(s.x)},${r(y1)} V${r(y2)}`, e.role, [[s.x, y1], [t.x, y2]]);
-      c.edgeLabel(s.x + 10, (y1 + y2) / 2 + 4, label, e.role);
+      const key = `${e.to}\u0000${label}`;
+      if (!fanLabels.has(key)) {
+        fanLabels.add(key);
+        c.edgeLabel(s.x + 10, (y1 + y2) / 2 + 4, label, e.role);
+      }
     } else {
       // Fan out or in: down, across, down.
       const notesBelow = s.noteSide === "below" && s.node.note ? NOTE_BELOW : 0;
@@ -511,7 +548,12 @@ export function renderSvg(graph: Graph, mode: "dark" | "light"): string {
         e.role,
         [[s.x, y1], [t.x, mid], [t.x, y2]],
       );
-      c.edgeLabel(t.x + 8, (mid + y2) / 2 + 4, label, e.role);
+      // Fanning in, the same label on every arrow is drawn once.
+      const key = `${e.to}\u0000${label}`;
+      if (!fanLabels.has(key)) {
+        fanLabels.add(key);
+        c.edgeLabel(t.x + 8, (mid + y2) / 2 + 4, label, e.role);
+      }
     }
   }
 

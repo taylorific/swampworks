@@ -92,20 +92,22 @@ a phase where it is is an amber loop beside the phase (in Mermaid, a `↺ method
 line in its box). Steps back to an earlier phase are red and labelled `(retry)`,
 phases whose name contains `fail` are red, and final phases are green.
 
-| Argument          | Description                                                                           |
-| ----------------- | ------------------------------------------------------------------------------------- |
-| `extension`       | Published extension whose description holds the transitions                           |
-| `transitions`     | Transition lines to draw instead                                                      |
-| `title`           | Diagram title (defaults to the extension name)                                        |
-| `subtitle`        | A line under the title in the Markdown file                                           |
-| `hideStates`      | Phases to leave out; their transitions become entry or exit dots                      |
-| `collapseStates`  | Phases to skip over: each way in is joined to each way out, under the outgoing method |
-| `omitMethods`     | Methods whose transitions are left out                                                |
-| `humanGates`      | Methods only a person may run, drawn as thick green arrows                            |
-| `highlightStates` | Phases to emphasise besides the final ones                                            |
-| `failureStates`   | Phases to draw as failures besides those named `*fail*`                               |
-| `notes`           | A short note under a phase, keyed by phase                                            |
-| `showComments`    | Add each transition's parenthetical comment to its arrow                              |
+| Argument          | Description                                                                                 |
+| ----------------- | ------------------------------------------------------------------------------------------- |
+| `extension`       | Published extension whose description holds the transitions                                 |
+| `transitions`     | Transition lines to draw instead                                                            |
+| `title`           | Diagram title (defaults to the extension name)                                              |
+| `subtitle`        | A line under the title in the Markdown file                                                 |
+| `hideStates`      | Phases to leave out; their transitions become entry or exit dots                            |
+| `collapseStates`  | Phases to skip over: each way in is joined to each way out, under the outgoing method       |
+| `omitMethods`     | Methods whose transitions are left out                                                      |
+| `humanGates`      | Methods only a person may run, drawn as thick green arrows                                  |
+| `highlightStates` | Phases to emphasise besides the final ones                                                  |
+| `failureStates`   | Phases to draw as failures besides those named `*fail*`                                     |
+| `notes`           | A short note under a phase, keyed by phase                                                  |
+| `showComments`    | Add each transition's parenthetical comment to its arrow                                    |
+| `path`            | A file to read the transition lines from, such as the docs page itself                      |
+| `backEdges`       | `retry` (red, labelled `(retry)`) or `normal`, for routine steps back like start after stop |
 
 ## Usage
 

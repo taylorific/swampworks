@@ -1,0 +1,37 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="-539 -76 1213.2 456" width="1214" height="456" font-family="ui-monospace, SFMono-Regular, Menlo, Consolas, 'Liberation Mono', monospace" role="img" aria-label="@taylor/slidev/deck">
+<defs><marker id="arrow-normal" viewBox="0 0 10 10" refX="9" refY="5" markerUnits="userSpaceOnUse" markerWidth="10" markerHeight="10" orient="auto-start-reverse"><path d="M0,1 L10,5 L0,9 z" fill="#2563eb"/></marker><marker id="arrow-human" viewBox="0 0 10 10" refX="9" refY="5" markerUnits="userSpaceOnUse" markerWidth="10" markerHeight="10" orient="auto-start-reverse"><path d="M0,1 L10,5 L0,9 z" fill="#16a34a"/></marker><marker id="arrow-fail" viewBox="0 0 10 10" refX="9" refY="5" markerUnits="userSpaceOnUse" markerWidth="10" markerHeight="10" orient="auto-start-reverse"><path d="M0,1 L10,5 L0,9 z" fill="#dc2626"/></marker><marker id="arrow-loop" viewBox="0 0 10 10" refX="9" refY="5" markerUnits="userSpaceOnUse" markerWidth="10" markerHeight="10" orient="auto-start-reverse"><path d="M0,1 L10,5 L0,9 z" fill="#d97706"/></marker><marker id="arrow-skip" viewBox="0 0 10 10" refX="9" refY="5" markerUnits="userSpaceOnUse" markerWidth="10" markerHeight="10" orient="auto-start-reverse"><path d="M0,1 L10,5 L0,9 z" fill="#8c959f"/></marker></defs>
+<text x="67.6" y="-28" font-size="24" font-weight="bold" fill="#15803d" text-anchor="middle">@taylor/slidev/deck</text>
+<path d="M0,0 V42" fill="none" stroke="#2563eb" stroke-width="1.5" marker-end="url(#arrow-normal)"/>
+<path d="M0,80 V134" fill="none" stroke="#2563eb" stroke-width="1.5" marker-end="url(#arrow-normal)"/>
+<path d="M75,147 H225" fill="none" stroke="#2563eb" stroke-width="1.5" marker-end="url(#arrow-normal)"/>
+<path d="M225,159 H75" fill="none" stroke="#2563eb" stroke-width="1.5" marker-end="url(#arrow-normal)"/>
+<path d="M0,172 V226" fill="none" stroke="#2563eb" stroke-width="1.5" marker-end="url(#arrow-normal)"/>
+<path d="M0,264 V318" fill="none" stroke="#2563eb" stroke-width="1.5" marker-end="url(#arrow-normal)"/>
+<path d="M-75,146 C-165,105 -165,201 -74,160" fill="none" stroke="#d97706" stroke-width="1.5" marker-end="url(#arrow-loop)"/>
+<path d="M-75,238 C-165,197 -165,293 -74,252" fill="none" stroke="#d97706" stroke-width="1.5" marker-end="url(#arrow-loop)"/>
+<rect x="-75" y="42" width="150" height="38" rx="4" fill="#f0fdfa" stroke="#0d9488" stroke-width="1.5"/>
+<text x="0" y="66.3" font-size="15" fill="#115e59" text-anchor="middle">deck</text>
+<rect x="-75" y="134" width="150" height="38" rx="4" fill="#f0fdfa" stroke="#0d9488" stroke-width="1.5"/>
+<text x="0" y="158.3" font-size="15" fill="#115e59" text-anchor="middle">scaffolded</text>
+<rect x="225" y="134" width="150" height="38" rx="4" fill="#f0fdfa" stroke="#0d9488" stroke-width="1.5"/>
+<text x="300" y="158.3" font-size="15" fill="#115e59" text-anchor="middle">serving</text>
+<rect x="-75" y="226" width="150" height="38" rx="4" fill="#f0fdfa" stroke="#0d9488" stroke-width="1.5"/>
+<text x="0" y="250.3" font-size="15" fill="#115e59" text-anchor="middle">builds</text>
+<rect x="-75" y="318" width="150" height="38" rx="4" fill="#dcfce7" stroke="#16a34a" stroke-width="2.5"/>
+<text x="0" y="342.3" font-size="15" fill="#14532d" text-anchor="middle" font-weight="bold">pushed</text>
+<text x="10" y="16" font-size="12" fill="#24292f">init</text>
+<text x="10" y="111" font-size="12" fill="#24292f">scaffold</text>
+<text x="150" y="139" font-size="12" fill="#24292f" text-anchor="middle">serve</text>
+<text x="150" y="176" font-size="12" fill="#24292f" text-anchor="middle">stop</text>
+<text x="10" y="203" font-size="12" fill="#24292f">build</text>
+<text x="10" y="295" font-size="12" fill="#24292f">push</text>
+<text x="91" y="65.2" font-size="12" fill="#57606a">from the Slidev template</text>
+<text x="-191" y="157.2" font-size="12" fill="#57606a" text-anchor="end">page numbers, Pages workflow, README, LICENSE</text>
+<text x="-153" y="123" font-size="12" fill="#d97706" text-anchor="end">loop ↺</text>
+<text x="-153" y="193" font-size="12" fill="#d97706" text-anchor="end">fit · outdated · upgrade</text>
+<text x="391" y="157.2" font-size="12" fill="#57606a">dev server in a background container</text>
+<text x="91" y="249.2" font-size="12" fill="#57606a">production build passes</text>
+<text x="-153" y="215" font-size="12" fill="#d97706" text-anchor="end">loop ↺</text>
+<text x="-153" y="285" font-size="12" fill="#d97706" text-anchor="end">export</text>
+<text x="91" y="341.2" font-size="12" fill="#57606a">Pages deploys from origin</text>
+</svg>

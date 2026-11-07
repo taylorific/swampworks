@@ -171,6 +171,14 @@ each run and deleted afterwards.
 
 The tests run every method against a fake runtime CLI.
 
+## Diagrams
+
+Diagrams of how it works, drawn from the source by
+[@taylor/swamp-diagrams](https://github.com/taylorific/swampworks/tree/main/swamp-diagrams):
+
+- [@taylor/slidev/deck](https://github.com/taylorific/swampworks/blob/main/slidev/docs/deck.md)
+- [@taylor/slidev-new-deck](https://github.com/taylorific/swampworks/blob/main/slidev/docs/slidev-new-deck.md)
+
 ## License
 
 AGPL-3.0-or-later with the Swamp Extension and Definition Exception; see

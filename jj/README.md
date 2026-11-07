@@ -182,6 +182,13 @@ jj config set --user <key> <toml value>
 ~/.swamp/deno/deno test --no-config --allow-all extensions/
 ```
 
+## Diagrams
+
+Diagrams of how it works, drawn from the source by
+[@taylor/swamp-diagrams](https://github.com/taylorific/swampworks/tree/main/swamp-diagrams):
+
+- [@taylor/jj/cli](https://github.com/taylorific/swampworks/blob/main/jj/docs/cli.md)
+
 ## License
 
 AGPL-3.0-or-later with the Swamp Extension and Definition Exception; see

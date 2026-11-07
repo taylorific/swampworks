@@ -1,0 +1,18 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="-302.2 -76 764.8 322" width="765" height="322" font-family="ui-monospace, SFMono-Regular, Menlo, Consolas, 'Liberation Mono', monospace" role="img" aria-label="@taylor/whisper-transcriber">
+<defs><marker id="arrow-normal" viewBox="0 0 10 10" refX="9" refY="5" markerUnits="userSpaceOnUse" markerWidth="10" markerHeight="10" orient="auto-start-reverse"><path d="M0,1 L10,5 L0,9 z" fill="#60a5fa"/></marker><marker id="arrow-human" viewBox="0 0 10 10" refX="9" refY="5" markerUnits="userSpaceOnUse" markerWidth="10" markerHeight="10" orient="auto-start-reverse"><path d="M0,1 L10,5 L0,9 z" fill="#4ade80"/></marker><marker id="arrow-fail" viewBox="0 0 10 10" refX="9" refY="5" markerUnits="userSpaceOnUse" markerWidth="10" markerHeight="10" orient="auto-start-reverse"><path d="M0,1 L10,5 L0,9 z" fill="#f87171"/></marker><marker id="arrow-loop" viewBox="0 0 10 10" refX="9" refY="5" markerUnits="userSpaceOnUse" markerWidth="10" markerHeight="10" orient="auto-start-reverse"><path d="M0,1 L10,5 L0,9 z" fill="#f59e0b"/></marker><marker id="arrow-skip" viewBox="0 0 10 10" refX="9" refY="5" markerUnits="userSpaceOnUse" markerWidth="10" markerHeight="10" orient="auto-start-reverse"><path d="M0,1 L10,5 L0,9 z" fill="#8b949e"/></marker><filter id="glow" x="-20%" y="-50%" width="140%" height="200%"><feGaussianBlur stdDeviation="4" result="b"/><feMerge><feMergeNode in="b"/><feMergeNode in="SourceGraphic"/></feMerge></filter></defs>
+<text x="80.2" y="-28" font-size="24" font-weight="bold" fill="#4ade80" text-anchor="middle" filter="url(#glow)">@taylor/whisper-transcriber</text>
+<path d="M0,38 V92" fill="none" stroke="#60a5fa" stroke-width="1.5" marker-end="url(#arrow-normal)"/>
+<path d="M0,130 V184" fill="none" stroke="#60a5fa" stroke-width="1.5" marker-end="url(#arrow-normal)"/>
+<path d="M75,25 H358.6 V197 H76" fill="none" stroke="#60a5fa" stroke-width="1.5" marker-end="url(#arrow-normal)"/>
+<rect x="-75" y="0" width="150" height="38" rx="4" fill="#0d1f1c" stroke="#2dd4bf" stroke-width="1.5"/>
+<text x="0" y="24.3" font-size="15" fill="#5eead4" text-anchor="middle">no_image</text>
+<rect x="-75" y="92" width="150" height="38" rx="4" fill="#0d1f1c" stroke="#2dd4bf" stroke-width="1.5"/>
+<text x="0" y="116.3" font-size="15" fill="#5eead4" text-anchor="middle">image</text>
+<rect x="-75" y="184" width="150" height="38" rx="4" fill="#0f2e1b" stroke="#4ade80" stroke-width="2.5"/>
+<text x="0" y="208.3" font-size="15" fill="#86efac" text-anchor="middle" font-weight="bold">transcripts</text>
+<text x="10" y="69" font-size="12" fill="#d1d5db">build</text>
+<text x="10" y="161" font-size="12" fill="#d1d5db">transcribe</text>
+<text x="366.6" y="111" font-size="12" fill="#d1d5db">transcribe</text>
+<text x="91" y="115.2" font-size="12" fill="#8b949e">under the container CLI or Docker</text>
+<text x="-91" y="207.2" font-size="12" fill="#8b949e" text-anchor="end">.txt, .srt, .vtt and .json</text>
+</svg>

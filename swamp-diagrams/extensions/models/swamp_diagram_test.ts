@@ -319,6 +319,8 @@ Deno.test("stateMachine method reads the registry description", async () => {
       failureStates: [],
       notes: {},
       showComments: false,
+      path: "",
+      backEdges: "retry",
       _fetch: (url, ext) =>
         Promise.resolve({ url: `${url}/${ext}`, description: LIFECYCLE }),
     },
@@ -343,6 +345,8 @@ Deno.test("stateMachine method reads the registry description", async () => {
         failureStates: [],
         notes: {},
         showComments: false,
+        path: "",
+        backEdges: "retry",
       },
       // deno-lint-ignore no-explicit-any
       ctx as any,
@@ -716,4 +720,68 @@ jobs:
   assert(!/NaN|Infinity/.test(svg));
   assertStringIncludes(svg, `aria-label="say &quot;hi&quot;"`);
   assertStringIncludes(svg, ">a &lt;b&gt;</text>");
+});
+
+Deno.test("stateMachine reads transitions from a page; backEdges=normal isn't a retry", async () => {
+  const dir = await Deno.makeTempDir();
+  try {
+    await Deno.mkdir(join(dir, "docs"));
+    const page = [
+      "# Lifecycle",
+      "",
+      "<!-- swamp-diagram: state-machine-taylor-thing -->",
+      "<!-- /swamp-diagram -->",
+      "",
+      "```text",
+      "absent ──[start]──> running",
+      "running ──[stop]──> stopped",
+      "stopped ──[start]──> running",
+      "stopped ──[remove]──> removed",
+      "```",
+      "",
+    ].join("\n");
+    await Deno.writeTextFile(join(dir, "docs/thing.md"), page);
+    const { ctx, resources } = fakeContext(dir, {
+      format: "svg",
+      embedIn: "docs",
+    });
+    await model.methods.stateMachine.execute(
+      {
+        extension: "",
+        transitions: "",
+        path: "docs/thing.md",
+        title: "@taylor/thing",
+        subtitle: "",
+        hideStates: ["absent"],
+        collapseStates: [],
+        omitMethods: [],
+        humanGates: [],
+        highlightStates: [],
+        failureStates: [],
+        notes: {},
+        showComments: false,
+        backEdges: "normal",
+      },
+      // deno-lint-ignore no-explicit-any
+      ctx as any,
+    );
+    const r = resources["state-machine-taylor-thing"];
+    assertEquals(r.source, "docs/thing.md");
+    assertEquals(r.embeddedIn, ["docs/thing.md"]);
+    const svg = await Deno.readTextFile(
+      join(dir, "docs/diagrams/state-machine-taylor-thing-dark.svg"),
+    );
+    assert(!svg.includes("(retry)"));
+    assert(
+      !svg.includes(`marker-end="url(#arrow-fail)"`),
+      "a routine step back is not red",
+    );
+    // The transition lines in the page are left as they were.
+    assertStringIncludes(
+      await Deno.readTextFile(join(dir, "docs/thing.md")),
+      "stopped ──[start]──> running",
+    );
+  } finally {
+    await Deno.remove(dir, { recursive: true });
+  }
 });

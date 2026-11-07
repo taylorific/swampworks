@@ -69,6 +69,12 @@ export interface StateMachineOptions {
   notes: Record<string, string>;
   /** Append each transition's parenthetical comment to its label. */
   showComments: boolean;
+  /**
+   * How to draw a step back to an earlier phase: `retry` (red, labelled
+   * "(retry)") or `normal` (for lifecycles where going back is routine, such
+   * as start after stop).
+   */
+  backEdges?: "retry" | "normal";
 }
 
 /** What was drawn, for the resource record. */
@@ -83,6 +89,7 @@ interface Edge {
   to: string;
   labels: string[];
   role: EdgeRole;
+  back: boolean;
 }
 
 const START = "__start";
@@ -209,10 +216,12 @@ function analyse(
     if (from === to) role = "loop";
     else if (human.has(t.method)) role = "human";
     else if (isFailure(to)) role = "fail";
-    else if (back.has(t)) role = "fail";
+    else if (back.has(t)) {
+      role = opts.backEdges === "normal" ? "normal" : "fail";
+    }
     let label = t.method;
     if (opts.showComments && t.comment) label += ` (${t.comment})`;
-    if (back.has(t) && !isFailure(to)) {
+    if (back.has(t) && !isFailure(to) && opts.backEdges !== "normal") {
       label += " (retry)";
     }
     const same = edges.find((e) =>
@@ -220,7 +229,7 @@ function analyse(
     );
     if (same) {
       if (!same.labels.includes(label)) same.labels.push(label);
-    } else edges.push({ from, to, labels: [label], role });
+    } else edges.push({ from, to, labels: [label], role, back: back.has(t) });
   }
 
   return { states, edges, isFailure, finals, kept };
@@ -253,7 +262,7 @@ export function stateMachineGraph(
       to: e.to === END ? GRAPH_END : e.to,
       label: e.labels.join(" / "),
       role: e.role,
-      back: e.labels.some((l) => l.endsWith("(retry)")),
+      back: e.back,
     })),
   };
 }

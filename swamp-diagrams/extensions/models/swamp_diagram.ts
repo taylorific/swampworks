@@ -108,6 +108,12 @@ const StateMachineArgsSchema = z.object({
   transitions: z.string().default("").describe(
     "Transition lines to draw instead, one per line: 'from ──[method]──> to'",
   ),
+  path: z.string().default("").describe(
+    "A file to read the transition lines from instead, relative to the repository (other lines are ignored, so it can be the docs page itself)",
+  ),
+  backEdges: z.enum(["retry", "normal"]).default("retry").describe(
+    "A step back to an earlier phase: retry (red, labelled '(retry)') or normal (routine, like start after stop)",
+  ),
   title: z.string().default("").describe(
     "Diagram title (defaults to the extension name)",
   ),
@@ -519,7 +525,7 @@ export const model = {
     {
       toVersion: "2026.11.06.3",
       description:
-        "Adds format svg, now the default: a light and dark SVG pair with a fixed, hand-drawn-style layout (set format=mermaid to keep Mermaid). Also ignores swamp-diagram markers inside code blocks and stops Mermaid labels clipping on GitHub; existing settings are kept",
+        "Adds format svg, now the default: a light and dark SVG pair with a fixed, hand-drawn-style layout (set format=mermaid to keep Mermaid). stateMachine can read transitions from a file (path) and draw routine steps back as normal arrows (backEdges=normal). Also ignores swamp-diagram markers inside code blocks and stops Mermaid labels clipping on GitHub; existing settings are kept",
       upgradeAttributes: (old: Record<string, unknown>) => old,
     },
   ],
@@ -649,12 +655,16 @@ export const model = {
         context: Context,
       ): Promise<{ dataHandles: { name: string }[] }> => {
         const g = context.globalArgs;
-        if (!args.extension && !args.transitions) {
-          throw new Error("Pass extension or transitions");
+        if (!args.extension && !args.transitions && !args.path) {
+          throw new Error("Pass extension, transitions or path");
         }
         let text = args.transitions;
         let source = "transitions argument";
-        if (!text) {
+        if (!text && args.path) {
+          const file = resolve(context.repoDir, args.path);
+          text = await Deno.readTextFile(file);
+          source = relative(context.repoDir, file);
+        } else if (!text) {
           const got = await (args._fetch ?? fetchDescription)(
             g.registryUrl,
             args.extension,
@@ -683,6 +693,7 @@ export const model = {
           failureStates: args.failureStates,
           notes: args.notes,
           showComments: args.showComments,
+          backEdges: args.backEdges,
         });
         const draw = (theme: Theme) =>
           renderStateMachine(transitions, options(theme));

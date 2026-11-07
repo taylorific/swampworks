@@ -1,0 +1,30 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="-540.8 -99 882 437" width="882" height="437" font-family="ui-monospace, SFMono-Regular, Menlo, Consolas, 'Liberation Mono', monospace" role="img" aria-label="@taylor/roam/graph">
+<defs><marker id="arrow-normal" viewBox="0 0 10 10" refX="9" refY="5" markerUnits="userSpaceOnUse" markerWidth="10" markerHeight="10" orient="auto-start-reverse"><path d="M0,1 L10,5 L0,9 z" fill="#2563eb"/></marker><marker id="arrow-human" viewBox="0 0 10 10" refX="9" refY="5" markerUnits="userSpaceOnUse" markerWidth="10" markerHeight="10" orient="auto-start-reverse"><path d="M0,1 L10,5 L0,9 z" fill="#16a34a"/></marker><marker id="arrow-fail" viewBox="0 0 10 10" refX="9" refY="5" markerUnits="userSpaceOnUse" markerWidth="10" markerHeight="10" orient="auto-start-reverse"><path d="M0,1 L10,5 L0,9 z" fill="#dc2626"/></marker><marker id="arrow-loop" viewBox="0 0 10 10" refX="9" refY="5" markerUnits="userSpaceOnUse" markerWidth="10" markerHeight="10" orient="auto-start-reverse"><path d="M0,1 L10,5 L0,9 z" fill="#d97706"/></marker><marker id="arrow-skip" viewBox="0 0 10 10" refX="9" refY="5" markerUnits="userSpaceOnUse" markerWidth="10" markerHeight="10" orient="auto-start-reverse"><path d="M0,1 L10,5 L0,9 z" fill="#8c959f"/></marker></defs>
+<text x="-99.8" y="-51" font-size="24" font-weight="bold" fill="#15803d" text-anchor="middle">@taylor/roam/graph</text>
+<path d="M-94,38 V65 H0 V92" fill="none" stroke="#2563eb" stroke-width="1.5" marker-end="url(#arrow-normal)"/>
+<path d="M0,130 V184" fill="none" stroke="#2563eb" stroke-width="1.5" marker-end="url(#arrow-normal)"/>
+<path d="M0,222 V276" fill="none" stroke="#2563eb" stroke-width="1.5" marker-end="url(#arrow-normal)"/>
+<path d="M76,301 H258.8 V105 H77" fill="none" stroke="#2563eb" stroke-width="1.5" marker-end="url(#arrow-normal)"/>
+<path d="M170,25 H276.8 V289 H77" fill="none" stroke="#2563eb" stroke-width="1.5" marker-end="url(#arrow-normal)"/>
+<path d="M-170,12 C-260,-29 -260,67 -169,26" fill="none" stroke="#d97706" stroke-width="1.5" marker-end="url(#arrow-loop)"/>
+<rect x="-170" y="0" width="152" height="38" rx="4" fill="#f0fdfa" stroke="#0d9488" stroke-width="1.5"/>
+<text x="-94" y="24.3" font-size="15" fill="#115e59" text-anchor="middle">daily_notes</text>
+<rect x="18" y="0" width="152" height="38" rx="4" fill="#f0fdfa" stroke="#0d9488" stroke-width="1.5"/>
+<text x="94" y="24.3" font-size="15" fill="#115e59" text-anchor="middle">outline</text>
+<rect x="-76" y="92" width="152" height="38" rx="4" fill="#f0fdfa" stroke="#0d9488" stroke-width="1.5"/>
+<text x="0" y="116.3" font-size="15" fill="#115e59" text-anchor="middle">prompt</text>
+<rect x="-76" y="184" width="152" height="38" rx="4" fill="#f0fdfa" stroke="#0d9488" stroke-width="1.5"/>
+<text x="0" y="208.3" font-size="15" fill="#115e59" text-anchor="middle">summary</text>
+<rect x="-76" y="276" width="152" height="38" rx="4" fill="#f0fdfa" stroke="#0d9488" stroke-width="1.5"/>
+<text x="0" y="300.3" font-size="15" fill="#115e59" text-anchor="middle">on_the_graph</text>
+<text x="8" y="82.5" font-size="12" fill="#24292f">collect</text>
+<text x="10" y="161" font-size="12" fill="#24292f">summarise</text>
+<text x="10" y="253" font-size="12" fill="#24292f">publish</text>
+<text x="266.8" y="203" font-size="12" fill="#24292f">collect</text>
+<text x="284.8" y="157" font-size="12" fill="#24292f">post</text>
+<text x="-248" y="-11" font-size="12" fill="#d97706" text-anchor="end">loop ↺</text>
+<text x="-248" y="59" font-size="12" fill="#d97706" text-anchor="end">dailies</text>
+<text x="-92" y="115.2" font-size="12" fill="#57606a" text-anchor="end">weekly: daily-note Activities; rollups: the summaries below</text>
+<text x="92" y="207.2" font-size="12" fill="#57606a">written with Claude</text>
+<text x="-92" y="299.2" font-size="12" fill="#57606a" text-anchor="end">heading block on the Monday after the period</text>
+</svg>
