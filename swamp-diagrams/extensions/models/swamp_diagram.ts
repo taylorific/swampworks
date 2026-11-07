@@ -57,8 +57,14 @@ const GlobalArgsSchema = z.object({
   registryUrl: z.string().url().default("https://swamp-club.com").describe(
     "swamp extension registry that stateMachine reads descriptions from",
   ),
-  dockerPath: z.string().default("docker").describe("Docker CLI binary"),
-  mermaidImage: z.string().default(MERMAID_CLI).describe(
+  dockerPath: z.string().min(1).regex(
+    /^[^-\s][^\s]*$/,
+    "a binary name or path, without spaces or a leading dash",
+  ).default("docker").describe("Docker CLI binary"),
+  mermaidImage: z.string().regex(
+    /^[a-z0-9][a-z0-9._/-]*(:[A-Za-z0-9._-]+)?(@sha256:[a-f0-9]{64})?$/,
+    "an image reference such as name:tag or name@sha256:<digest>",
+  ).default(MERMAID_CLI).describe(
     "mermaid-cli container image used to render SVG or PNG",
   ),
 });
@@ -198,6 +204,10 @@ const dockerRenderer: Renderer = async (mermaid, format, g) => {
       background(theme),
     );
     if (format === "png") args.push("-s", "2");
+    // The only subprocess: the digest-pinned mermaid-cli image, run only when
+    // render is set. dockerPath and mermaidImage are validated by the schema,
+    // and every other argument is built here, not taken from input.
+    // swamp-quality-ignore deno-command
     const out = await new Deno.Command(g.dockerPath, {
       args,
       stdout: "piped",
@@ -215,6 +225,36 @@ const dockerRenderer: Renderer = async (mermaid, format, g) => {
     await Deno.remove(dir, { recursive: true }).catch(() => {});
   }
 };
+
+/** Whether Docker can render, when rendering is asked for at all. */
+export async function dockerAvailable(
+  g: Pick<GlobalArgs, "render" | "dockerPath">,
+): Promise<{ pass: boolean; errors?: string[] }> {
+  if (g.render === "none") return { pass: true };
+  const fail = (why: string) => ({
+    pass: false,
+    errors: [
+      `render=${g.render} needs Docker to run mermaid-cli, but ${why}. Install or start Docker, or set render=none.`,
+    ],
+  });
+  try {
+    // swamp-quality-ignore deno-command
+    const out = await new Deno.Command(g.dockerPath, {
+      args: ["version", "--format", "{{.Server.Version}}"],
+      stdout: "null",
+      stderr: "piped",
+      signal: AbortSignal.timeout(15_000),
+    }).output();
+    if (out.success) return { pass: true };
+    const err = new TextDecoder().decode(out.stderr).trim().split("\n")[0];
+    return fail(`the daemon did not answer (${err || "no output"})`);
+  } catch (err) {
+    if (err instanceof Deno.errors.NotFound) {
+      return fail(`${g.dockerPath} was not found`);
+    }
+    return fail(err instanceof Error ? err.message : String(err));
+  }
+}
 
 /** Store a diagram as data files, optionally render it and copy it out. */
 async function save(
@@ -359,6 +399,7 @@ async function workflowFiles(dir: string, top = true): Promise<string[]> {
 export async function findWorkflows(
   repoDir: string,
   args: { name: string; path: string; dir?: string },
+  logger?: Logger,
 ): Promise<{ path: string; doc: WorkflowDoc }[]> {
   if (args.path) {
     const path = resolve(repoDir, args.path);
@@ -370,7 +411,13 @@ export async function findWorkflows(
     let doc: WorkflowDoc;
     try {
       doc = parseWorkflow(await Deno.readTextFile(path), path);
-    } catch {
+    } catch (err) {
+      // Everything in a workflows/ folder should be a workflow, so say so
+      // rather than leave a broken one out of the docs silently.
+      logger?.warning("Skipped {file}: {reason}", {
+        file: relative(repoDir, path),
+        reason: err instanceof Error ? err.message : String(err),
+      });
       continue;
     }
     const file = path.split("/").pop()!.replace(/\.ya?ml$/, "");
@@ -413,8 +460,28 @@ export async function fetchDescription(
 /** The @taylor/mermaid/diagram behavior. */
 export const model = {
   type: "@taylor/swamp-diagrams/diagram",
-  version: "2026.11.06.1",
+  version: "2026.11.06.2",
   globalArguments: GlobalArgsSchema,
+  upgrades: [
+    {
+      toVersion: "2026.11.06.2",
+      description:
+        "Validates dockerPath and mermaidImage, checks Docker before rendering, and reports skipped and clashing workflows; no settings changed",
+      upgradeAttributes: (old: Record<string, unknown>) => old,
+    },
+  ],
+  checks: {
+    "docker-available": {
+      description:
+        "When render is set, the Docker CLI can reach a daemon to run mermaid-cli",
+      labels: ["live"],
+      appliesTo: ["workflow", "stateMachine"],
+      execute: (
+        context: { globalArgs: GlobalArgs },
+      ): Promise<{ pass: boolean; errors?: string[] }> =>
+        dockerAvailable(context.globalArgs),
+    },
+  },
   resources: {
     diagram: {
       description:
@@ -455,9 +522,27 @@ export const model = {
       ): Promise<{ dataHandles: { name: string }[] }> => {
         const g = context.globalArgs;
         const handles: { name: string }[] = [];
-        for (
-          const { path, doc } of await findWorkflows(context.repoDir, args)
-        ) {
+        const found = await findWorkflows(
+          context.repoDir,
+          args,
+          context.logger,
+        );
+        // Diagram names come from workflow names; two that differ only in
+        // punctuation would overwrite each other's diagram.
+        const seen = new Map<string, string>();
+        for (const { path, doc } of found) {
+          const instance = `workflow-${slug(doc.name)}`;
+          const other = seen.get(instance);
+          if (other) {
+            throw new Error(
+              `${relative(context.repoDir, other)} and ${
+                relative(context.repoDir, path)
+              } would both be drawn as ${instance}; rename one of the workflows`,
+            );
+          }
+          seen.set(instance, path);
+        }
+        for (const { path, doc } of found) {
           const draw = (theme: Theme) =>
             renderWorkflow(doc, {
               title: args.title,

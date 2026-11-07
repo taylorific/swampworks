@@ -1,6 +1,6 @@
 manifestVersion: 1
 name: "@taylor/swamp-diagrams"
-version: "2026.11.06.1"
+version: "2026.11.06.2"
 license: AGPL-3.0-or-later
 description: "Diagrams of swamp workflows and of behaviors' state machines, as Mermaid. workflow draws workflows as flowcharts: a box per job, a node per step, and dependsOn arrows labelled with their condition. stateMachine draws a behavior's phases and the methods that move between them, from the transition lines in a published extension's description (such as @swamp/issue-lifecycle) or passed in, with loops, retries, failure phases and human-only gates marked. The default theme reads in GitHub's light and dark modes; diagrams can be written into marked blocks in Markdown docs, and rendered to SVG or PNG with the mermaid-cli container."
 repository: "https://github.com/taylorific/swampworks"
