@@ -18,6 +18,7 @@ import {
   periodContaining,
   periodFromKey,
   resolvePeriod,
+  slug,
   trimCode,
 } from "./roam_graph.ts";
 
@@ -29,6 +30,7 @@ interface Node {
   uid: string;
   string?: string;
   title?: string;
+  open?: boolean;
   children: Node[];
 }
 
@@ -97,7 +99,7 @@ class FakeRoam {
 
   apply(a: Record<string, unknown>) {
     this.writes.push(a);
-    const block = a.block as { uid: string; string?: string };
+    const block = a.block as { uid: string; string?: string; open?: boolean };
     switch (a.action) {
       case "batch-actions":
         for (const x of a.actions as Record<string, unknown>[]) this.apply(x);
@@ -114,6 +116,7 @@ class FakeRoam {
         parent.node.children.push({
           uid: block.uid,
           string: block.string,
+          ...(block.open === undefined ? {} : { open: block.open }),
           children: [],
         });
         return;
@@ -183,7 +186,7 @@ function ctx(methodName: string, section?: string) {
 }
 
 async function run(
-  method: "collect" | "publish" | "dailies",
+  method: "collect" | "publish" | "dailies" | "post",
   roam: FakeRoam,
   args: Record<string, unknown>,
   today = "2026-10-11",
@@ -630,4 +633,149 @@ Deno.test("Retry-After sets the wait between retries", async () => {
     t.context as unknown as Ctx,
   );
   assertEquals(waits, [7000]);
+});
+
+// ---- post ----
+
+const LOG = {
+  title: "Commit log",
+  content: "## repo\n- a ```b``` c\n",
+  language: "markdown",
+};
+
+Deno.test("slug makes a data-safe name from a heading", () => {
+  assertEquals(
+    slug("Bitbucket Week Ending October 30, 2026"),
+    "bitbucket-week-ending-october-30-2026",
+  );
+});
+
+Deno.test("post writes a heading, its outline and a collapsed code block", async () => {
+  const roam = new FakeRoam().page(
+    "2026-11-02",
+    "Week Ending October 30, 2026",
+  );
+  const t = await run("post", roam, {
+    date: "2026-11-02",
+    heading: "Bitbucket Week Ending October 30, 2026",
+    markdown: SUMMARY,
+    codeBlocks: [LOG],
+  });
+  const page = roam.pages.get("11-02-2026")!;
+  assertEquals(page.children.map((c) => c.string), [
+    "Week Ending October 30, 2026",
+    "Bitbucket Week Ending October 30, 2026",
+  ]);
+  const heading = page.children[1];
+  assertEquals(heading.children.map((c) => c.string), [
+    "**Theme**",
+    "**Overall theme:** good",
+    "Commit log",
+  ]);
+  const log = heading.children[2];
+  assertEquals(log.open, false);
+  assertEquals(log.children.map((c) => c.string), [
+    "```markdown\n## repo\n- a '''b''' c\n```",
+  ]);
+  const p = written(t, "post-2026-11-02-bitbucket-week-ending-october-30-2026");
+  assertEquals([p.action, p.blockUid], ["created", heading.uid]);
+  assertEquals(p.codeBlocks, [{
+    title: "Commit log",
+    language: "markdown",
+    chars: 22,
+  }]);
+});
+
+Deno.test("post creates the daily note when it does not exist", async () => {
+  const roam = new FakeRoam();
+  await run("post", roam, {
+    date: "2026-05-25",
+    heading: "Notes",
+    markdown: SUMMARY,
+  });
+  const page = roam.pages.get("05-25-2026")!;
+  assertEquals(page.title, "May 25th, 2026");
+  assertEquals(page.children[0].string, "Notes");
+});
+
+Deno.test("post skips a heading that is already on the note", async () => {
+  const roam = new FakeRoam().page("2026-11-02", ["**Notes:**", ["by hand"]]);
+  const t = await run("post", roam, {
+    date: "2026-11-02",
+    heading: "Notes",
+    markdown: SUMMARY,
+  });
+  assertEquals(roam.writes, []);
+  assertEquals(written(t, "post-2026-11-02-notes").action, "skipped");
+});
+
+Deno.test("post only matches top-level blocks", async () => {
+  const roam = new FakeRoam().page("2026-11-02", ["Activities", ["Notes"]]);
+  const t = await run("post", roam, {
+    date: "2026-11-02",
+    heading: "Notes",
+    markdown: SUMMARY,
+  });
+  assertEquals(written(t, "post-2026-11-02-notes").action, "created");
+  assertEquals(roam.pages.get("11-02-2026")!.children.length, 2);
+});
+
+Deno.test("post replace swaps the contents in place", async () => {
+  const roam = new FakeRoam().page("2026-11-02", ["Notes", ["old"]], "after");
+  const uid = roam.pages.get("11-02-2026")!.children[0].uid;
+  await run("post", roam, {
+    date: "2026-11-02",
+    heading: "Notes",
+    codeBlocks: [LOG],
+    ifExists: "replace",
+  });
+  const page = roam.pages.get("11-02-2026")!;
+  assertEquals(page.children.map((c) => c.string), ["Notes", "after"]);
+  assertEquals(page.children[0].uid, uid);
+  assertEquals(page.children[0].children.map((c) => c.string), ["Commit log"]);
+});
+
+Deno.test("post fail refuses to touch an existing heading", async () => {
+  const roam = new FakeRoam().page("2026-11-02", "Notes");
+  await assertRejects(
+    () =>
+      run("post", roam, {
+        date: "2026-11-02",
+        heading: "Notes",
+        markdown: SUMMARY,
+        ifExists: "fail",
+      }),
+    Error,
+    "already exists",
+  );
+});
+
+Deno.test("post refuses to write an empty heading", async () => {
+  await assertRejects(
+    () => run("post", new FakeRoam(), { date: "2026-11-02", heading: "Notes" }),
+    Error,
+    "Nothing to post",
+  );
+});
+
+Deno.test("a 429 without Retry-After waits out Roam's per-minute quota", async () => {
+  const roam = septemberGraph();
+  roam.throttle = 4;
+  const waits: number[] = [];
+  const t = ctx("dailies");
+  await model.methods.dailies.execute(
+    {
+      ...model.methods.dailies.arguments.parse({
+        start: "2026-09-28",
+        end: "2026-09-28",
+      }),
+      _fetch: roam.fetch,
+      _sleep: (ms: number) => {
+        waits.push(ms);
+        return Promise.resolve();
+      },
+    },
+    t.context as unknown as Ctx,
+  );
+  assertEquals(waits, [15000, 30000, 60000, 60000]);
 });
