@@ -1,0 +1,19 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="-510.2 -76 1256.4 204.6" width="1257" height="205" font-family="ui-monospace, SFMono-Regular, Menlo, Consolas, 'Liberation Mono', monospace" role="img" aria-label="@taylor/swamp-training/deck">
+<defs><marker id="arrow-normal" viewBox="0 0 10 10" refX="9" refY="5" markerUnits="userSpaceOnUse" markerWidth="10" markerHeight="10" orient="auto-start-reverse"><path d="M0,1 L10,5 L0,9 z" fill="#2563eb"/></marker><marker id="arrow-human" viewBox="0 0 10 10" refX="9" refY="5" markerUnits="userSpaceOnUse" markerWidth="10" markerHeight="10" orient="auto-start-reverse"><path d="M0,1 L10,5 L0,9 z" fill="#16a34a"/></marker><marker id="arrow-fail" viewBox="0 0 10 10" refX="9" refY="5" markerUnits="userSpaceOnUse" markerWidth="10" markerHeight="10" orient="auto-start-reverse"><path d="M0,1 L10,5 L0,9 z" fill="#dc2626"/></marker><marker id="arrow-loop" viewBox="0 0 10 10" refX="9" refY="5" markerUnits="userSpaceOnUse" markerWidth="10" markerHeight="10" orient="auto-start-reverse"><path d="M0,1 L10,5 L0,9 z" fill="#d97706"/></marker><marker id="arrow-skip" viewBox="0 0 10 10" refX="9" refY="5" markerUnits="userSpaceOnUse" markerWidth="10" markerHeight="10" orient="auto-start-reverse"><path d="M0,1 L10,5 L0,9 z" fill="#8c959f"/></marker></defs>
+<text x="118" y="-28" font-size="24" font-weight="bold" fill="#15803d" text-anchor="middle">@taylor/swamp-training/deck</text>
+<path d="M0,0 V42" fill="none" stroke="#2563eb" stroke-width="1.5" marker-end="url(#arrow-normal)"/>
+<path d="M75,55 H225" fill="none" stroke="#2563eb" stroke-width="1.5" marker-end="url(#arrow-normal)"/>
+<path d="M225,67 H75" fill="none" stroke="#2563eb" stroke-width="1.5" marker-end="url(#arrow-normal)"/>
+<path d="M-75,54 C-165,13 -165,109 -74,68" fill="none" stroke="#d97706" stroke-width="1.5" marker-end="url(#arrow-loop)"/>
+<rect x="-75" y="42" width="150" height="38" rx="4" fill="#f0fdfa" stroke="#0d9488" stroke-width="1.5"/>
+<text x="0" y="66.3" font-size="15" fill="#115e59" text-anchor="middle">tested</text>
+<rect x="225" y="42" width="150" height="38" rx="4" fill="#f0fdfa" stroke="#0d9488" stroke-width="1.5"/>
+<text x="300" y="66.3" font-size="15" fill="#115e59" text-anchor="middle">behind</text>
+<text x="10" y="16" font-size="12" fill="#24292f">retest</text>
+<text x="150" y="47" font-size="12" fill="#24292f" text-anchor="middle">watch</text>
+<text x="150" y="84" font-size="12" fill="#24292f" text-anchor="middle">retest</text>
+<text x="-191" y="65.2" font-size="12" fill="#57606a" text-anchor="end">commands, lab and installed files checked</text>
+<text x="-153" y="31" font-size="12" fill="#d97706" text-anchor="end">loop ↺</text>
+<text x="-153" y="101" font-size="12" fill="#d97706" text-anchor="end">watch</text>
+<text x="391" y="65.2" font-size="12" fill="#57606a">a swamp release newer than the last one tested</text>
+</svg>

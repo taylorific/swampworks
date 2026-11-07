@@ -253,6 +253,13 @@ noted:
 ~/.swamp/deno/deno test --no-config --allow-all extensions/
 ```
 
+## Diagrams
+
+Diagrams of how it works, drawn from the source by
+[@taylor/swamp-diagrams](https://github.com/taylorific/swampworks/tree/main/swamp-diagrams):
+
+- [@taylor/libvirt diagrams](https://github.com/taylorific/swampworks/blob/main/libvirt/docs/README.md)
+
 ## License
 
 AGPL-3.0-or-later with the Swamp Extension and Definition Exception; see

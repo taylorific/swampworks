@@ -1,0 +1,31 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="-336.8 -114 655.6 450" width="656" height="450" font-family="ui-monospace, SFMono-Regular, Menlo, Consolas, 'Liberation Mono', monospace" role="img" aria-label="@taylor/kvm-host-check-ssh">
+<defs><marker id="arrow-normal" viewBox="0 0 10 10" refX="9" refY="5" markerUnits="userSpaceOnUse" markerWidth="10" markerHeight="10" orient="auto-start-reverse"><path d="M0,1 L10,5 L0,9 z" fill="#60a5fa"/></marker><marker id="arrow-human" viewBox="0 0 10 10" refX="9" refY="5" markerUnits="userSpaceOnUse" markerWidth="10" markerHeight="10" orient="auto-start-reverse"><path d="M0,1 L10,5 L0,9 z" fill="#4ade80"/></marker><marker id="arrow-fail" viewBox="0 0 10 10" refX="9" refY="5" markerUnits="userSpaceOnUse" markerWidth="10" markerHeight="10" orient="auto-start-reverse"><path d="M0,1 L10,5 L0,9 z" fill="#f87171"/></marker><marker id="arrow-loop" viewBox="0 0 10 10" refX="9" refY="5" markerUnits="userSpaceOnUse" markerWidth="10" markerHeight="10" orient="auto-start-reverse"><path d="M0,1 L10,5 L0,9 z" fill="#f59e0b"/></marker><marker id="arrow-skip" viewBox="0 0 10 10" refX="9" refY="5" markerUnits="userSpaceOnUse" markerWidth="10" markerHeight="10" orient="auto-start-reverse"><path d="M0,1 L10,5 L0,9 z" fill="#8b949e"/></marker><filter id="glow" x="-20%" y="-50%" width="140%" height="200%"><feGaussianBlur stdDeviation="4" result="b"/><feMerge><feMergeNode in="b"/><feMergeNode in="SourceGraphic"/></feMerge></filter></defs>
+<text x="-9" y="-66" font-size="24" font-weight="bold" fill="#4ade80" text-anchor="middle" filter="url(#glow)">@taylor/kvm-host-check-ssh</text>
+<rect x="-312.8" y="0" width="607.6" height="312" rx="8" fill="none" stroke="#3f4b5b" stroke-width="1" stroke-dasharray="4 4"/>
+<path d="M0,84 V138" fill="none" stroke="#60a5fa" stroke-width="1.5" marker-end="url(#arrow-normal)"/>
+<path d="M0,176 V203 H-188 V230" fill="none" stroke="#60a5fa" stroke-width="1.5" marker-end="url(#arrow-normal)"/>
+<path d="M0,176 V230" fill="none" stroke="#60a5fa" stroke-width="1.5" marker-end="url(#arrow-normal)"/>
+<path d="M0,176 V203 H188 V230" fill="none" stroke="#60a5fa" stroke-width="1.5" marker-end="url(#arrow-normal)"/>
+<rect x="-76" y="46" width="152" height="38" rx="4" fill="#0d1f1c" stroke="#2dd4bf" stroke-width="1.5"/>
+<text x="0" y="70.3" font-size="15" fill="#5eead4" text-anchor="middle">uplink</text>
+<rect x="-76" y="138" width="152" height="38" rx="4" fill="#0d1f1c" stroke="#2dd4bf" stroke-width="1.5"/>
+<text x="0" y="162.3" font-size="15" fill="#5eead4" text-anchor="middle">host</text>
+<rect x="-264" y="230" width="152" height="38" rx="4" fill="#0d1f1c" stroke="#2dd4bf" stroke-width="1.5"/>
+<text x="-188" y="254.3" font-size="15" fill="#5eead4" text-anchor="middle">pool-default</text>
+<rect x="-76" y="230" width="152" height="38" rx="4" fill="#0d1f1c" stroke="#2dd4bf" stroke-width="1.5"/>
+<text x="0" y="254.3" font-size="15" fill="#5eead4" text-anchor="middle">pool-iso</text>
+<rect x="112" y="230" width="152" height="38" rx="4" fill="#0d1f1c" stroke="#2dd4bf" stroke-width="1.5"/>
+<text x="188" y="254.3" font-size="15" fill="#5eead4" text-anchor="middle">network</text>
+<text x="10" y="115" font-size="12" fill="#d1d5db"></text>
+<text x="-180" y="220.5" font-size="12" fill="#d1d5db"></text>
+<text x="10" y="207" font-size="12" fill="#d1d5db"></text>
+<text x="196" y="220.5" font-size="12" fill="#d1d5db"></text>
+<text x="92" y="69.2" font-size="12" fill="#8b949e">ssh-kvm-uplink · check</text>
+<text x="92" y="161.2" font-size="12" fill="#8b949e">ssh-kvm-host · check</text>
+<text x="-188" y="284" font-size="12" fill="#8b949e" text-anchor="middle">ssh-kvm-pool-default · check</text>
+<text x="0" y="284" font-size="12" fill="#8b949e" text-anchor="middle">ssh-kvm-pool-iso · check</text>
+<text x="188" y="284" font-size="12" fill="#8b949e" text-anchor="middle">ssh-kvm-network · check</text>
+<text x="-298.8" y="22" font-size="12" fill="#8b949e">kvm-host</text>
+<text x="-9" y="-41" font-size="13" fill="#9ca3af" text-anchor="middle">Check a KVM host against the kvm-training setup over SSH, with nothing</text>
+<text x="-9" y="-22" font-size="13" fill="#9ca3af" text-anchor="middle">installed on the host; changes nothing</text>
+</svg>

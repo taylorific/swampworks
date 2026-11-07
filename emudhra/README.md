@@ -513,6 +513,13 @@ releases come from the page's table and the OpenJDK advisory, as of
 22 October, except cloudflared and WARP (Cloudflare's post) and
 `tls_certificate_check` (its changelog).
 
+## Diagrams
+
+Diagrams of how it works, drawn from the source by
+[@taylor/swamp-diagrams](https://github.com/taylorific/swampworks/tree/main/swamp-diagrams):
+
+- [@taylor/emudhra/exposure](https://github.com/taylorific/swampworks/blob/main/emudhra/docs/exposure.md)
+
 ## License
 
 AGPL-3.0-or-later with the Swamp Extension and Definition Exception; see

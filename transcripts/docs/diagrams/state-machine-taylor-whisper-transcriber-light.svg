@@ -1,0 +1,18 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="-302.2 -76 764.8 322" width="765" height="322" font-family="ui-monospace, SFMono-Regular, Menlo, Consolas, 'Liberation Mono', monospace" role="img" aria-label="@taylor/whisper-transcriber">
+<defs><marker id="arrow-normal" viewBox="0 0 10 10" refX="9" refY="5" markerUnits="userSpaceOnUse" markerWidth="10" markerHeight="10" orient="auto-start-reverse"><path d="M0,1 L10,5 L0,9 z" fill="#2563eb"/></marker><marker id="arrow-human" viewBox="0 0 10 10" refX="9" refY="5" markerUnits="userSpaceOnUse" markerWidth="10" markerHeight="10" orient="auto-start-reverse"><path d="M0,1 L10,5 L0,9 z" fill="#16a34a"/></marker><marker id="arrow-fail" viewBox="0 0 10 10" refX="9" refY="5" markerUnits="userSpaceOnUse" markerWidth="10" markerHeight="10" orient="auto-start-reverse"><path d="M0,1 L10,5 L0,9 z" fill="#dc2626"/></marker><marker id="arrow-loop" viewBox="0 0 10 10" refX="9" refY="5" markerUnits="userSpaceOnUse" markerWidth="10" markerHeight="10" orient="auto-start-reverse"><path d="M0,1 L10,5 L0,9 z" fill="#d97706"/></marker><marker id="arrow-skip" viewBox="0 0 10 10" refX="9" refY="5" markerUnits="userSpaceOnUse" markerWidth="10" markerHeight="10" orient="auto-start-reverse"><path d="M0,1 L10,5 L0,9 z" fill="#8c959f"/></marker></defs>
+<text x="80.2" y="-28" font-size="24" font-weight="bold" fill="#15803d" text-anchor="middle">@taylor/whisper-transcriber</text>
+<path d="M0,38 V92" fill="none" stroke="#2563eb" stroke-width="1.5" marker-end="url(#arrow-normal)"/>
+<path d="M0,130 V184" fill="none" stroke="#2563eb" stroke-width="1.5" marker-end="url(#arrow-normal)"/>
+<path d="M75,25 H358.6 V197 H76" fill="none" stroke="#2563eb" stroke-width="1.5" marker-end="url(#arrow-normal)"/>
+<rect x="-75" y="0" width="150" height="38" rx="4" fill="#f0fdfa" stroke="#0d9488" stroke-width="1.5"/>
+<text x="0" y="24.3" font-size="15" fill="#115e59" text-anchor="middle">no_image</text>
+<rect x="-75" y="92" width="150" height="38" rx="4" fill="#f0fdfa" stroke="#0d9488" stroke-width="1.5"/>
+<text x="0" y="116.3" font-size="15" fill="#115e59" text-anchor="middle">image</text>
+<rect x="-75" y="184" width="150" height="38" rx="4" fill="#dcfce7" stroke="#16a34a" stroke-width="2.5"/>
+<text x="0" y="208.3" font-size="15" fill="#14532d" text-anchor="middle" font-weight="bold">transcripts</text>
+<text x="10" y="69" font-size="12" fill="#24292f">build</text>
+<text x="10" y="161" font-size="12" fill="#24292f">transcribe</text>
+<text x="366.6" y="111" font-size="12" fill="#24292f">transcribe</text>
+<text x="91" y="115.2" font-size="12" fill="#57606a">under the container CLI or Docker</text>
+<text x="-91" y="207.2" font-size="12" fill="#57606a" text-anchor="end">.txt, .srt, .vtt and .json</text>
+</svg>

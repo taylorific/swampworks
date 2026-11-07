@@ -260,21 +260,37 @@ export function hasBlock(text: string, name: string): boolean {
   return markers(text, name).length > 0;
 }
 
+/** A fenced mermaid code block. */
+export function mermaidBlock(mermaid: string): string {
+  return "```mermaid\n" + mermaid.trimEnd() + "\n```";
+}
+
+/** A <picture> showing `<base>-dark.svg` in dark mode, `<base>-light.svg` otherwise. */
+export function pictureBlock(base: string, alt: string): string {
+  const a = alt.replace(/&/g, "&amp;").replace(/"/g, "&quot;")
+    .replace(/</g, "&lt;");
+  return [
+    "<picture>",
+    `  <source media="(prefers-color-scheme: dark)" srcset="${base}-dark.svg">`,
+    `  <img alt="${a}" src="${base}-light.svg">`,
+    "</picture>",
+  ].join("\n");
+}
+
 /**
  * Replace the body of every `<!-- swamp-diagram: <name> -->` …
- * `<!-- /swamp-diagram -->` block for `name` in `text` with a fenced mermaid
- * block. Markers inside code blocks are examples and are left alone. Returns
- * the text unchanged when it has no such block.
+ * `<!-- /swamp-diagram -->` block for `name` in `text` with `body` (a
+ * mermaidBlock or pictureBlock). Markers inside code blocks are examples and
+ * are left alone. Returns the text unchanged when it has no such block.
  */
-export function embed(text: string, name: string, mermaid: string): string {
+export function embed(text: string, name: string, body: string): string {
   let out = "";
   let last = 0;
   for (const m of markers(text, name)) {
     const start = m.index! + m[0].length;
     const end = text.indexOf(END, start);
     if (end < 0) throw new Error(`swamp-diagram: ${name} has no ${END}`);
-    out += text.slice(last, start) + "\n\n```mermaid\n" + mermaid.trimEnd() +
-      "\n```\n\n";
+    out += text.slice(last, start) + "\n\n" + body.trimEnd() + "\n\n";
     last = end;
   }
   return last === 0 ? text : out + text.slice(last);

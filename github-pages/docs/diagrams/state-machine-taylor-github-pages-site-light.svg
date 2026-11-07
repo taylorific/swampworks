@@ -1,0 +1,17 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="-221.2 -76 567.6 254.6" width="568" height="255" font-family="ui-monospace, SFMono-Regular, Menlo, Consolas, 'Liberation Mono', monospace" role="img" aria-label="@taylor/github-pages/site">
+<defs><marker id="arrow-normal" viewBox="0 0 10 10" refX="9" refY="5" markerUnits="userSpaceOnUse" markerWidth="10" markerHeight="10" orient="auto-start-reverse"><path d="M0,1 L10,5 L0,9 z" fill="#2563eb"/></marker><marker id="arrow-human" viewBox="0 0 10 10" refX="9" refY="5" markerUnits="userSpaceOnUse" markerWidth="10" markerHeight="10" orient="auto-start-reverse"><path d="M0,1 L10,5 L0,9 z" fill="#16a34a"/></marker><marker id="arrow-fail" viewBox="0 0 10 10" refX="9" refY="5" markerUnits="userSpaceOnUse" markerWidth="10" markerHeight="10" orient="auto-start-reverse"><path d="M0,1 L10,5 L0,9 z" fill="#dc2626"/></marker><marker id="arrow-loop" viewBox="0 0 10 10" refX="9" refY="5" markerUnits="userSpaceOnUse" markerWidth="10" markerHeight="10" orient="auto-start-reverse"><path d="M0,1 L10,5 L0,9 z" fill="#d97706"/></marker><marker id="arrow-skip" viewBox="0 0 10 10" refX="9" refY="5" markerUnits="userSpaceOnUse" markerWidth="10" markerHeight="10" orient="auto-start-reverse"><path d="M0,1 L10,5 L0,9 z" fill="#8c959f"/></marker></defs>
+<text x="62.6" y="-28" font-size="24" font-weight="bold" fill="#15803d" text-anchor="middle">@taylor/github-pages/site</text>
+<path d="M-94,38 V65 H0 V92" fill="none" stroke="#2563eb" stroke-width="1.5" marker-end="url(#arrow-normal)"/>
+<path d="M94,38 V65 H0 V92" fill="none" stroke="#2563eb" stroke-width="1.5" marker-end="url(#arrow-normal)"/>
+<path d="M-76,104 C-166,63 -166,159 -75,118" fill="none" stroke="#d97706" stroke-width="1.5" marker-end="url(#arrow-loop)"/>
+<rect x="-170" y="0" width="152" height="38" rx="4" fill="#f0fdfa" stroke="#0d9488" stroke-width="1.5"/>
+<text x="-94" y="24.3" font-size="15" fill="#115e59" text-anchor="middle">pages_off</text>
+<rect x="18" y="0" width="152" height="38" rx="4" fill="#f0fdfa" stroke="#0d9488" stroke-width="1.5"/>
+<text x="94" y="24.3" font-size="15" fill="#115e59" text-anchor="middle">branch_build</text>
+<rect x="-76" y="92" width="152" height="38" rx="4" fill="#dcfce7" stroke="#16a34a" stroke-width="2.5"/>
+<text x="0" y="116.3" font-size="15" fill="#14532d" text-anchor="middle" font-weight="bold">actions</text>
+<text x="8" y="82.5" font-size="12" fill="#24292f">ensure</text>
+<text x="92" y="115.2" font-size="12" fill="#57606a">Pages builds from GitHub Actions</text>
+<text x="-154" y="81" font-size="12" fill="#d97706" text-anchor="end">loop ↺</text>
+<text x="-154" y="151" font-size="12" fill="#d97706" text-anchor="end">ensure</text>
+</svg>

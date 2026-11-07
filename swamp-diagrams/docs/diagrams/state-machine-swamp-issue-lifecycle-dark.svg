@@ -1,0 +1,65 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="-354.6 -95 783.6 1027" width="784" height="1027" font-family="ui-monospace, SFMono-Regular, Menlo, Consolas, 'Liberation Mono', monospace" role="img" aria-label="@swamp/issue-lifecycle">
+<defs><marker id="arrow-normal" viewBox="0 0 10 10" refX="9" refY="5" markerUnits="userSpaceOnUse" markerWidth="10" markerHeight="10" orient="auto-start-reverse"><path d="M0,1 L10,5 L0,9 z" fill="#60a5fa"/></marker><marker id="arrow-human" viewBox="0 0 10 10" refX="9" refY="5" markerUnits="userSpaceOnUse" markerWidth="10" markerHeight="10" orient="auto-start-reverse"><path d="M0,1 L10,5 L0,9 z" fill="#4ade80"/></marker><marker id="arrow-fail" viewBox="0 0 10 10" refX="9" refY="5" markerUnits="userSpaceOnUse" markerWidth="10" markerHeight="10" orient="auto-start-reverse"><path d="M0,1 L10,5 L0,9 z" fill="#f87171"/></marker><marker id="arrow-loop" viewBox="0 0 10 10" refX="9" refY="5" markerUnits="userSpaceOnUse" markerWidth="10" markerHeight="10" orient="auto-start-reverse"><path d="M0,1 L10,5 L0,9 z" fill="#f59e0b"/></marker><marker id="arrow-skip" viewBox="0 0 10 10" refX="9" refY="5" markerUnits="userSpaceOnUse" markerWidth="10" markerHeight="10" orient="auto-start-reverse"><path d="M0,1 L10,5 L0,9 z" fill="#8b949e"/></marker><filter id="glow" x="-20%" y="-50%" width="140%" height="200%"><feGaussianBlur stdDeviation="4" result="b"/><feMerge><feMergeNode in="b"/><feMergeNode in="SourceGraphic"/></feMerge></filter></defs>
+<text x="37.2" y="-47" font-size="24" font-weight="bold" fill="#4ade80" text-anchor="middle" filter="url(#glow)">@swamp/issue-lifecycle</text>
+<path d="M0,0 V42" fill="none" stroke="#60a5fa" stroke-width="1.5" marker-end="url(#arrow-normal)"/>
+<path d="M0,80 V134" fill="none" stroke="#60a5fa" stroke-width="1.5" marker-end="url(#arrow-normal)"/>
+<path d="M0,172 V226" fill="none" stroke="#60a5fa" stroke-width="1.5" marker-end="url(#arrow-normal)"/>
+<path d="M0,264 V318" fill="none" stroke="#4ade80" stroke-width="2.2" marker-end="url(#arrow-human)"/>
+<path d="M0,356 V410" fill="none" stroke="#60a5fa" stroke-width="1.5" marker-end="url(#arrow-normal)"/>
+<path d="M0,448 V502" fill="none" stroke="#60a5fa" stroke-width="1.5" marker-end="url(#arrow-normal)"/>
+<path d="M85,515 H235" fill="none" stroke="#f87171" stroke-width="1.5" marker-end="url(#arrow-fail)"/>
+<path d="M235,527 H85" fill="none" stroke="#f87171" stroke-width="1.5" marker-end="url(#arrow-fail)"/>
+<path d="M320,502 C320,440 261.3,429 86,429" fill="none" stroke="#f87171" stroke-width="1.5" marker-end="url(#arrow-fail)"/>
+<path d="M0,540 V594" fill="none" stroke="#60a5fa" stroke-width="1.5" marker-end="url(#arrow-normal)"/>
+<path d="M0,632 V686" fill="none" stroke="#60a5fa" stroke-width="1.5" marker-end="url(#arrow-normal)"/>
+<path d="M0,724 V778" fill="none" stroke="#60a5fa" stroke-width="1.5" marker-end="url(#arrow-normal)"/>
+<path d="M0,816 V870" fill="none" stroke="#60a5fa" stroke-width="1.5" marker-end="url(#arrow-normal)"/>
+<path d="M-85,238 C-175,197 -175,293 -84,252" fill="none" stroke="#f59e0b" stroke-width="1.5" marker-end="url(#arrow-loop)"/>
+<path d="M-85,514 C-175,473 -175,569 -84,528" fill="none" stroke="#f59e0b" stroke-width="1.5" marker-end="url(#arrow-loop)"/>
+<rect x="-85" y="42" width="170" height="38" rx="4" fill="#0d1f1c" stroke="#2dd4bf" stroke-width="1.5"/>
+<text x="0" y="66.3" font-size="15" fill="#5eead4" text-anchor="middle">triaging</text>
+<rect x="-85" y="134" width="170" height="38" rx="4" fill="#0d1f1c" stroke="#2dd4bf" stroke-width="1.5"/>
+<text x="0" y="158.3" font-size="15" fill="#5eead4" text-anchor="middle">classified</text>
+<rect x="-85" y="226" width="170" height="38" rx="4" fill="#0d1f1c" stroke="#2dd4bf" stroke-width="1.5"/>
+<text x="0" y="250.3" font-size="15" fill="#5eead4" text-anchor="middle">plan_generated</text>
+<rect x="-85" y="318" width="170" height="38" rx="4" fill="#0f2e1b" stroke="#4ade80" stroke-width="2.5"/>
+<text x="0" y="342.3" font-size="15" fill="#86efac" text-anchor="middle" font-weight="bold">approved</text>
+<rect x="-85" y="410" width="170" height="38" rx="4" fill="#0d1f1c" stroke="#2dd4bf" stroke-width="1.5"/>
+<text x="0" y="434.3" font-size="15" fill="#5eead4" text-anchor="middle">implementing</text>
+<rect x="-85" y="502" width="170" height="38" rx="4" fill="#0d1f1c" stroke="#2dd4bf" stroke-width="1.5"/>
+<text x="0" y="526.3" font-size="15" fill="#5eead4" text-anchor="middle">pr_open</text>
+<rect x="235" y="502" width="170" height="38" rx="4" fill="#2a1215" stroke="#f87171" stroke-width="1.5"/>
+<text x="320" y="526.3" font-size="15" fill="#fca5a5" text-anchor="middle">pr_failed</text>
+<rect x="-85" y="594" width="170" height="38" rx="4" fill="#0d1f1c" stroke="#2dd4bf" stroke-width="1.5"/>
+<text x="0" y="618.3" font-size="15" fill="#5eead4" text-anchor="middle">releasing</text>
+<rect x="-85" y="686" width="170" height="38" rx="4" fill="#0d1f1c" stroke="#2dd4bf" stroke-width="1.5"/>
+<text x="0" y="710.3" font-size="15" fill="#5eead4" text-anchor="middle">notify</text>
+<rect x="-85" y="778" width="170" height="38" rx="4" fill="#0d1f1c" stroke="#2dd4bf" stroke-width="1.5"/>
+<text x="0" y="802.3" font-size="15" fill="#5eead4" text-anchor="middle">summarizing</text>
+<rect x="-85" y="870" width="170" height="38" rx="4" fill="#0f2e1b" stroke="#4ade80" stroke-width="2.5"/>
+<text x="0" y="894.3" font-size="15" fill="#86efac" text-anchor="middle" font-weight="bold">done</text>
+<text x="10" y="16" font-size="12" fill="#d1d5db">start</text>
+<text x="10" y="111" font-size="12" fill="#d1d5db">triage</text>
+<text x="10" y="203" font-size="12" fill="#d1d5db">plan</text>
+<text x="10" y="295" font-size="12" fill="#4ade80" font-weight="bold">approve</text>
+<text x="10" y="387" font-size="12" fill="#d1d5db">implement</text>
+<text x="10" y="479" font-size="12" fill="#d1d5db">link_pr</text>
+<text x="160" y="507" font-size="12" fill="#f87171" text-anchor="middle">pr_failed</text>
+<text x="160" y="544" font-size="12" fill="#f87171" text-anchor="middle">link_pr (retry)</text>
+<text x="222.5" y="419" font-size="12" fill="#f87171" text-anchor="middle">implement (retry)</text>
+<text x="10" y="571" font-size="12" fill="#d1d5db">pr_merged</text>
+<text x="10" y="663" font-size="12" fill="#d1d5db">ship</text>
+<text x="10" y="755" font-size="12" fill="#d1d5db">notify / skip_notify</text>
+<text x="10" y="847" font-size="12" fill="#d1d5db">summarize</text>
+<text x="101" y="65.2" font-size="12" fill="#8b949e">reads CLAUDE.md + design + skills</text>
+<text x="101" y="157.2" font-size="12" fill="#8b949e">bug · feature · security</text>
+<text x="-163" y="215" font-size="12" fill="#f59e0b" text-anchor="end">loop ↺</text>
+<text x="-163" y="285" font-size="12" fill="#f59e0b" text-anchor="end">iterate</text>
+<text x="-101" y="433.2" font-size="12" fill="#8b949e" text-anchor="end">under CLAUDE.md</text>
+<text x="-201" y="525.2" font-size="12" fill="#8b949e" text-anchor="end">CI · 5 merge gates</text>
+<text x="-163" y="491" font-size="12" fill="#f59e0b" text-anchor="end">loop ↺</text>
+<text x="-163" y="561" font-size="12" fill="#f59e0b" text-anchor="end">link_pr</text>
+<text x="101" y="709.2" font-size="12" fill="#8b949e">thanks contributor</text>
+<text x="101" y="893.2" font-size="12" fill="#8b949e">auto-merged &amp; shipped</text>
+<text x="37.2" y="-22" font-size="13" fill="#9ca3af" text-anchor="middle">a typed state machine — every transition is validated</text>
+</svg>

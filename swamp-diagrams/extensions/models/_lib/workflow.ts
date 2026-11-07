@@ -15,6 +15,7 @@ import {
   nodeLabel,
   type Theme,
 } from "./mermaid.ts";
+import type { Graph, GraphEdge, GraphGroup } from "./graph.ts";
 
 /** The parts of a workflow file the diagram uses. */
 export interface WorkflowDoc {
@@ -199,4 +200,75 @@ export function renderWorkflow(
     if (s) lines.push(s);
   });
   return { mermaid: lines.join("\n") + "\n", jobs: wf.jobs.length, steps };
+}
+
+/** The workflow as a graph, for the SVG renderer: one group per job. */
+export function workflowGraph(wf: WorkflowDoc, title?: string): Graph {
+  const groups: GraphGroup[] = [];
+  const edges: GraphEdge[] = [];
+  const groupEdges: GraphEdge[] = [];
+  const id = (job: string, step: string) => `${job}/${step}`;
+  for (const job of wf.jobs) {
+    const where = Object.entries(job.labels ?? {}).map(([k, v]) => `${k}=${v}`)
+      .join(", ");
+    groups.push({
+      id: job.name,
+      label: where ? `${job.name} · on worker ${where}` : job.name,
+      nodes: (job.steps ?? []).map((step) => {
+        const task = describeTask(step.task);
+        const extras = [task.text];
+        if (step.forEach) {
+          extras.push(
+            `for each ${
+              Object.entries(step.forEach).map(([k, v]) => `${k} ${v}`).join(
+                ", ",
+              )
+            }`,
+          );
+        }
+        if (step.guard) extras.push("guarded");
+        if (step.allowFailure) extras.push("may fail");
+        return {
+          id: id(job.name, step.name),
+          label: step.name,
+          note: extras.join(" · "),
+          kind: task.human
+            ? "highlight"
+            : step.allowFailure
+            ? "dashed"
+            : "normal",
+          nested: step.task?.type === "workflow",
+        };
+      }),
+    });
+    for (const step of job.steps ?? []) {
+      for (const dep of step.dependsOn ?? []) {
+        if (!dep.step) continue;
+        const c = describeCondition(dep.condition);
+        edges.push({
+          from: id(job.name, dep.step),
+          to: id(job.name, step.name),
+          label: c.label,
+          role: c.role,
+        });
+      }
+    }
+    for (const dep of job.dependsOn ?? []) {
+      if (!dep.job) continue;
+      const c = describeCondition(dep.condition);
+      groupEdges.push({
+        from: dep.job,
+        to: job.name,
+        label: c.label,
+        role: c.role,
+      });
+    }
+  }
+  return {
+    title: title || wf.name,
+    subtitle: wf.description?.trim(),
+    groups,
+    edges,
+    groupEdges,
+  };
 }

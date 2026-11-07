@@ -242,6 +242,13 @@ DevTools connection.
 CI (`.github/workflows/ci.yml` at the repository root) runs both on every pull
 request that touches this extension.
 
+## Diagrams
+
+Diagrams of how it works, drawn from the source by
+[@taylor/swamp-diagrams](https://github.com/taylorific/swampworks/tree/main/swamp-diagrams):
+
+- [@taylor/webshot](https://github.com/taylorific/swampworks/blob/main/webshot/docs/capture.md)
+
 ## License
 
 AGPL-3.0-or-later with the Swamp Extension and Definition Exception; see

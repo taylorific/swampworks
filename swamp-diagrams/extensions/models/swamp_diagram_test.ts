@@ -11,10 +11,12 @@ import {
   model,
   slug,
 } from "./swamp_diagram.ts";
+import { renderSvg } from "./_lib/svg.ts";
 import {
   collapse,
   parseTransitions,
   renderStateMachine,
+  stateMachineGraph,
   type StateMachineOptions,
 } from "./_lib/state_machine.ts";
 import {
@@ -22,8 +24,15 @@ import {
   describeTask,
   parseWorkflow,
   renderWorkflow,
+  workflowGraph,
 } from "./_lib/workflow.ts";
-import { classDefs, embed, escapeLabel, frontmatter } from "./_lib/mermaid.ts";
+import {
+  classDefs,
+  embed,
+  escapeLabel,
+  frontmatter,
+  mermaidBlock,
+} from "./_lib/mermaid.ts";
 
 const LIFECYCLE = `
 ## State Machine
@@ -50,7 +59,9 @@ notify ──[skip_notify]──> done
 \`\`\`
 `;
 
-const opts = (o: Partial<StateMachineOptions> = {}): StateMachineOptions => ({
+const opts = (
+  o: Partial<StateMachineOptions & { subtitle: string }> = {},
+): StateMachineOptions & { subtitle?: string } => ({
   title: "t",
   theme: "dark",
   direction: "TD",
@@ -215,6 +226,7 @@ function fakeContext(repoDir: string, g: Record<string, unknown> = {}) {
     ctx: {
       repoDir,
       globalArgs: {
+        format: "mermaid",
         theme: "dark",
         direction: "TD",
         render: "none",
@@ -307,6 +319,8 @@ Deno.test("stateMachine method reads the registry description", async () => {
       failureStates: [],
       notes: {},
       showComments: false,
+      path: "",
+      backEdges: "retry",
       _fetch: (url, ext) =>
         Promise.resolve({ url: `${url}/${ext}`, description: LIFECYCLE }),
     },
@@ -331,6 +345,8 @@ Deno.test("stateMachine method reads the registry description", async () => {
         failureStates: [],
         notes: {},
         showComments: false,
+        path: "",
+        backEdges: "retry",
       },
       // deno-lint-ignore no-explicit-any
       ctx as any,
@@ -419,11 +435,14 @@ Deno.test("embed replaces only the named block and is idempotent", () => {
     "<!-- /swamp-diagram -->",
     "",
   ].join("\n");
-  const once = embed(doc, "a", "flowchart TD\n  x --> y\n");
+  const once = embed(doc, "a", mermaidBlock("flowchart TD\n  x --> y\n"));
   assertStringIncludes(once, "```mermaid\nflowchart TD\n  x --> y\n```");
   assert(!once.includes("old"));
   assertStringIncludes(once, "keep");
-  assertEquals(embed(once, "a", "flowchart TD\n  x --> y\n"), once);
+  assertEquals(
+    embed(once, "a", mermaidBlock("flowchart TD\n  x --> y\n")),
+    once,
+  );
   assertEquals(embed(doc, "c", "x"), doc);
 });
 
@@ -540,7 +559,7 @@ Deno.test("embed leaves markers inside code blocks alone", () => {
     "<!-- /swamp-diagram -->",
     "",
   ].join("\n");
-  const out = embed(doc, "a", "flowchart TD");
+  const out = embed(doc, "a", mermaidBlock("flowchart TD"));
   assertStringIncludes(
     out,
     "```markdown\n<!-- swamp-diagram: a -->\n<!-- /swamp-diagram -->\n```",
@@ -548,4 +567,221 @@ Deno.test("embed leaves markers inside code blocks alone", () => {
   assertEquals(out.split("```mermaid").length, 2);
   const example = doc.split("\n").slice(0, 7).join("\n");
   assertEquals(embed(example, "a", "x"), example);
+});
+
+Deno.test("SVG layout: main path down the middle, failures beside, retries back", () => {
+  const g = stateMachineGraph(
+    parseTransitions(LIFECYCLE),
+    opts({
+      humanGates: ["approve"],
+      hideStates: ["created"],
+      collapseStates: ["verifying"],
+      notes: { triaging: "reads <CLAUDE.md>" },
+      subtitle: "a typed state machine",
+    }),
+  );
+  for (const mode of ["dark", "light"] as const) {
+    const svg = renderSvg(g, mode);
+    assert(!/NaN|Infinity/.test(svg), "every coordinate is a number");
+    assertStringIncludes(svg, "<svg xmlns=");
+    assertStringIncludes(svg, "a typed state machine");
+    assertStringIncludes(svg, "reads &lt;CLAUDE.md&gt;");
+    assertStringIncludes(svg, ">implement (retry)<");
+    assertStringIncludes(svg, `marker-end="url(#arrow-human)"`);
+    for (const s of ["triaging", "approved", "pr_failed", "done"]) {
+      assertStringIncludes(svg, `>${s}</text>`);
+    }
+  }
+  // pr_failed sits level with pr_open, to its right.
+  const svg = renderSvg(g, "dark");
+  const at = (label: string) => {
+    const m = new RegExp(
+      `<text x="([-\\d.]+)" y="([-\\d.]+)"[^>]*>${label}</text>`,
+    )
+      .exec(svg)!;
+    return { x: Number(m[1]), y: Number(m[2]) };
+  };
+  assertEquals(at("pr_failed").y, at("pr_open").y);
+  assert(at("pr_failed").x > at("pr_open").x);
+  assertEquals(at("triaging").x, at("done").x);
+  assert(at("triaging").y < at("done").y);
+});
+
+Deno.test("SVG layout: workflow jobs are framed and fan-outs share a row", () => {
+  const wf = parseWorkflow(
+    `
+name: fan
+jobs:
+  - name: host
+    labels: { role: kvm-host }
+    steps:
+      - name: a
+        task: { type: behavior, behavior: x, methodName: m }
+      - name: b
+        task: { type: behavior, behavior: x, methodName: m }
+        dependsOn: [{ step: a }]
+      - name: c
+        task: { type: behavior, behavior: x, methodName: m }
+        dependsOn: [{ step: a }]
+`,
+    "fan.yaml",
+  );
+  const svg = renderSvg(workflowGraph(wf), "light");
+  assert(!/NaN|Infinity/.test(svg));
+  assertStringIncludes(svg, "host · on worker role=kvm-host");
+  assertStringIncludes(svg, `stroke-dasharray="4 4"`);
+  const y = (label: string) =>
+    Number(new RegExp(`y="([-\\d.]+)"[^>]*>${label}</text>`).exec(svg)![1]);
+  assertEquals(y("b"), y("c"));
+  assert(y("a") < y("b"));
+});
+
+Deno.test("format svg embeds a <picture> and writes the pair beside the page", async () => {
+  const dir = await Deno.makeTempDir();
+  try {
+    await Deno.mkdir(join(dir, "workflows"));
+    await Deno.mkdir(join(dir, "docs"));
+    await Deno.writeTextFile(join(dir, "workflows/w.yaml"), WORKFLOW);
+    await Deno.writeTextFile(
+      join(dir, "docs/page.md"),
+      "# Page\n\n<!-- swamp-diagram: workflow-build-and-ship -->\n<!-- /swamp-diagram -->\n",
+    );
+    const { ctx, resources } = fakeContext(dir, {
+      format: "svg",
+      embedIn: "docs",
+    });
+    const run = () =>
+      model.methods.workflow.execute(
+        { name: "", path: "", dir: "", title: "" },
+        // deno-lint-ignore no-explicit-any
+        ctx as any,
+      );
+    await run();
+    const page = await Deno.readTextFile(join(dir, "docs/page.md"));
+    assertStringIncludes(
+      page,
+      `<source media="(prefers-color-scheme: dark)" srcset="diagrams/workflow-build-and-ship-dark.svg">`,
+    );
+    assertStringIncludes(
+      page,
+      `src="diagrams/workflow-build-and-ship-light.svg"`,
+    );
+    const dark = await Deno.readTextFile(
+      join(dir, "docs/diagrams/workflow-build-and-ship-dark.svg"),
+    );
+    assertStringIncludes(dark, "<svg");
+    assertEquals(resources["workflow-build-and-ship"].copiedTo, [
+      "docs/diagrams/workflow-build-and-ship-dark.svg",
+      "docs/diagrams/workflow-build-and-ship-light.svg",
+    ]);
+    const before = (await Deno.stat(
+      join(dir, "docs/diagrams/workflow-build-and-ship-dark.svg"),
+    )).mtime;
+    await run();
+    assertEquals(await Deno.readTextFile(join(dir, "docs/page.md")), page);
+    assertEquals(
+      (await Deno.stat(
+        join(dir, "docs/diagrams/workflow-build-and-ship-dark.svg"),
+      ))
+        .mtime,
+      before,
+      "an unchanged diagram isn't rewritten",
+    );
+  } finally {
+    await Deno.remove(dir, { recursive: true });
+  }
+});
+
+Deno.test("format svg needs no Docker", async () => {
+  assertEquals(
+    await dockerAvailable({
+      format: "svg",
+      render: "png",
+      dockerPath: "/nonexistent",
+    }),
+    { pass: true },
+  );
+});
+
+Deno.test("SVG survives quotes in titles and a job with no steps", () => {
+  const wf = parseWorkflow(
+    `
+name: 'say "hi"'
+jobs:
+  - name: empty
+  - name: one
+    steps:
+      - name: a <b>
+        task: { type: behavior, behavior: x, methodName: m }
+`,
+    "q.yaml",
+  );
+  const svg = renderSvg(workflowGraph(wf), "dark");
+  assert(!/NaN|Infinity/.test(svg));
+  assertStringIncludes(svg, `aria-label="say &quot;hi&quot;"`);
+  assertStringIncludes(svg, ">a &lt;b&gt;</text>");
+});
+
+Deno.test("stateMachine reads transitions from a page; backEdges=normal isn't a retry", async () => {
+  const dir = await Deno.makeTempDir();
+  try {
+    await Deno.mkdir(join(dir, "docs"));
+    const page = [
+      "# Lifecycle",
+      "",
+      "<!-- swamp-diagram: state-machine-taylor-thing -->",
+      "<!-- /swamp-diagram -->",
+      "",
+      "```text",
+      "absent ──[start]──> running",
+      "running ──[stop]──> stopped",
+      "stopped ──[start]──> running",
+      "stopped ──[remove]──> removed",
+      "```",
+      "",
+    ].join("\n");
+    await Deno.writeTextFile(join(dir, "docs/thing.md"), page);
+    const { ctx, resources } = fakeContext(dir, {
+      format: "svg",
+      embedIn: "docs",
+    });
+    await model.methods.stateMachine.execute(
+      {
+        extension: "",
+        transitions: "",
+        path: "docs/thing.md",
+        title: "@taylor/thing",
+        subtitle: "",
+        hideStates: ["absent"],
+        collapseStates: [],
+        omitMethods: [],
+        humanGates: [],
+        highlightStates: [],
+        failureStates: [],
+        notes: {},
+        showComments: false,
+        backEdges: "normal",
+      },
+      // deno-lint-ignore no-explicit-any
+      ctx as any,
+    );
+    const r = resources["state-machine-taylor-thing"];
+    assertEquals(r.source, "docs/thing.md");
+    assertEquals(r.embeddedIn, ["docs/thing.md"]);
+    const svg = await Deno.readTextFile(
+      join(dir, "docs/diagrams/state-machine-taylor-thing-dark.svg"),
+    );
+    assert(!svg.includes("(retry)"));
+    assert(
+      !svg.includes(`marker-end="url(#arrow-fail)"`),
+      "a routine step back is not red",
+    );
+    // The transition lines in the page are left as they were.
+    assertStringIncludes(
+      await Deno.readTextFile(join(dir, "docs/thing.md")),
+      "stopped ──[start]──> running",
+    );
+  } finally {
+    await Deno.remove(dir, { recursive: true });
+  }
 });

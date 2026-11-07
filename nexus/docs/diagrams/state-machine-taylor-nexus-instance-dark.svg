@@ -1,0 +1,29 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="-402.2 -76 600.4 364" width="601" height="364" font-family="ui-monospace, SFMono-Regular, Menlo, Consolas, 'Liberation Mono', monospace" role="img" aria-label="@taylor/nexus/instance">
+<defs><marker id="arrow-normal" viewBox="0 0 10 10" refX="9" refY="5" markerUnits="userSpaceOnUse" markerWidth="10" markerHeight="10" orient="auto-start-reverse"><path d="M0,1 L10,5 L0,9 z" fill="#60a5fa"/></marker><marker id="arrow-human" viewBox="0 0 10 10" refX="9" refY="5" markerUnits="userSpaceOnUse" markerWidth="10" markerHeight="10" orient="auto-start-reverse"><path d="M0,1 L10,5 L0,9 z" fill="#4ade80"/></marker><marker id="arrow-fail" viewBox="0 0 10 10" refX="9" refY="5" markerUnits="userSpaceOnUse" markerWidth="10" markerHeight="10" orient="auto-start-reverse"><path d="M0,1 L10,5 L0,9 z" fill="#f87171"/></marker><marker id="arrow-loop" viewBox="0 0 10 10" refX="9" refY="5" markerUnits="userSpaceOnUse" markerWidth="10" markerHeight="10" orient="auto-start-reverse"><path d="M0,1 L10,5 L0,9 z" fill="#f59e0b"/></marker><marker id="arrow-skip" viewBox="0 0 10 10" refX="9" refY="5" markerUnits="userSpaceOnUse" markerWidth="10" markerHeight="10" orient="auto-start-reverse"><path d="M0,1 L10,5 L0,9 z" fill="#8b949e"/></marker><filter id="glow" x="-20%" y="-50%" width="140%" height="200%"><feGaussianBlur stdDeviation="4" result="b"/><feMerge><feMergeNode in="b"/><feMergeNode in="SourceGraphic"/></feMerge></filter></defs>
+<text x="-102" y="-28" font-size="24" font-weight="bold" fill="#4ade80" text-anchor="middle" filter="url(#glow)">@taylor/nexus/instance</text>
+<path d="M0,0 V42" fill="none" stroke="#60a5fa" stroke-width="1.5" marker-end="url(#arrow-normal)"/>
+<path d="M0,80 V134" fill="none" stroke="#60a5fa" stroke-width="1.5" marker-end="url(#arrow-normal)"/>
+<path d="M75,159 H105 V55 H76" fill="none" stroke="#60a5fa" stroke-width="1.5" marker-end="url(#arrow-normal)"/>
+<path d="M0,172 V226" fill="none" stroke="#60a5fa" stroke-width="1.5" marker-end="url(#arrow-normal)"/>
+<path d="M75,67 H123 V239 H76" fill="none" stroke="#60a5fa" stroke-width="1.5" marker-end="url(#arrow-normal)"/>
+<path d="M-75,54 C-165,13 -165,109 -74,68" fill="none" stroke="#f59e0b" stroke-width="1.5" marker-end="url(#arrow-loop)"/>
+<path d="M-75,146 C-165,105 -165,201 -74,160" fill="none" stroke="#f59e0b" stroke-width="1.5" marker-end="url(#arrow-loop)"/>
+<rect x="-75" y="42" width="150" height="38" rx="4" fill="#0d1f1c" stroke="#2dd4bf" stroke-width="1.5"/>
+<text x="0" y="66.3" font-size="15" fill="#5eead4" text-anchor="middle">running</text>
+<rect x="-75" y="134" width="150" height="38" rx="4" fill="#0d1f1c" stroke="#2dd4bf" stroke-width="1.5"/>
+<text x="0" y="158.3" font-size="15" fill="#5eead4" text-anchor="middle">stopped</text>
+<rect x="-75" y="226" width="150" height="38" rx="4" fill="#0f2e1b" stroke="#4ade80" stroke-width="2.5"/>
+<text x="0" y="250.3" font-size="15" fill="#86efac" text-anchor="middle" font-weight="bold">deleted</text>
+<text x="10" y="16" font-size="12" fill="#d1d5db">start</text>
+<text x="10" y="111" font-size="12" fill="#d1d5db">stop</text>
+<text x="113" y="107" font-size="12" fill="#d1d5db">start</text>
+<text x="10" y="203" font-size="12" fill="#d1d5db">delete</text>
+<text x="131" y="153" font-size="12" fill="#d1d5db">delete</text>
+<text x="-191" y="65.2" font-size="12" fill="#8b949e" text-anchor="end">ready, onboarding complete</text>
+<text x="-153" y="31" font-size="12" fill="#f59e0b" text-anchor="end">loop ↺</text>
+<text x="-153" y="101" font-size="12" fill="#f59e0b" text-anchor="end">sync</text>
+<text x="-191" y="157.2" font-size="12" fill="#8b949e" text-anchor="end">container and data kept</text>
+<text x="-153" y="123" font-size="12" fill="#f59e0b" text-anchor="end">loop ↺</text>
+<text x="-153" y="193" font-size="12" fill="#f59e0b" text-anchor="end">sync</text>
+<text x="-91" y="249.2" font-size="12" fill="#8b949e" text-anchor="end">data volume kept unless removeVolume</text>
+</svg>

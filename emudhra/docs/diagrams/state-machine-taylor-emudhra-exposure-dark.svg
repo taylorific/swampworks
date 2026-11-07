@@ -1,0 +1,23 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="-476 -76 952 230" width="952" height="230" font-family="ui-monospace, SFMono-Regular, Menlo, Consolas, 'Liberation Mono', monospace" role="img" aria-label="@taylor/emudhra/exposure">
+<defs><marker id="arrow-normal" viewBox="0 0 10 10" refX="9" refY="5" markerUnits="userSpaceOnUse" markerWidth="10" markerHeight="10" orient="auto-start-reverse"><path d="M0,1 L10,5 L0,9 z" fill="#60a5fa"/></marker><marker id="arrow-human" viewBox="0 0 10 10" refX="9" refY="5" markerUnits="userSpaceOnUse" markerWidth="10" markerHeight="10" orient="auto-start-reverse"><path d="M0,1 L10,5 L0,9 z" fill="#4ade80"/></marker><marker id="arrow-fail" viewBox="0 0 10 10" refX="9" refY="5" markerUnits="userSpaceOnUse" markerWidth="10" markerHeight="10" orient="auto-start-reverse"><path d="M0,1 L10,5 L0,9 z" fill="#f87171"/></marker><marker id="arrow-loop" viewBox="0 0 10 10" refX="9" refY="5" markerUnits="userSpaceOnUse" markerWidth="10" markerHeight="10" orient="auto-start-reverse"><path d="M0,1 L10,5 L0,9 z" fill="#f59e0b"/></marker><marker id="arrow-skip" viewBox="0 0 10 10" refX="9" refY="5" markerUnits="userSpaceOnUse" markerWidth="10" markerHeight="10" orient="auto-start-reverse"><path d="M0,1 L10,5 L0,9 z" fill="#8b949e"/></marker><filter id="glow" x="-20%" y="-50%" width="140%" height="200%"><feGaussianBlur stdDeviation="4" result="b"/><feMerge><feMergeNode in="b"/><feMergeNode in="SourceGraphic"/></feMerge></filter></defs>
+<text x="0" y="-28" font-size="24" font-weight="bold" fill="#4ade80" text-anchor="middle" filter="url(#glow)">@taylor/emudhra/exposure</text>
+<path d="M-376,38 V65 H0 V92" fill="none" stroke="#60a5fa" stroke-width="1.5" marker-end="url(#arrow-normal)"/>
+<path d="M-188,38 V65 H0 V92" fill="none" stroke="#60a5fa" stroke-width="1.5" marker-end="url(#arrow-normal)"/>
+<path d="M0,38 V92" fill="none" stroke="#60a5fa" stroke-width="1.5" marker-end="url(#arrow-normal)"/>
+<path d="M188,38 V65 H0 V92" fill="none" stroke="#60a5fa" stroke-width="1.5" marker-end="url(#arrow-normal)"/>
+<path d="M376,38 V65 H0 V92" fill="none" stroke="#60a5fa" stroke-width="1.5" marker-end="url(#arrow-normal)"/>
+<rect x="-452" y="0" width="152" height="38" rx="4" fill="#0d1f1c" stroke="#2dd4bf" stroke-width="1.5"/>
+<text x="-376" y="24.3" font-size="15" fill="#5eead4" text-anchor="middle">host</text>
+<rect x="-264" y="0" width="152" height="38" rx="4" fill="#0d1f1c" stroke="#2dd4bf" stroke-width="1.5"/>
+<text x="-188" y="24.3" font-size="15" fill="#5eead4" text-anchor="middle">ssh_machines</text>
+<rect x="-76" y="0" width="152" height="38" rx="4" fill="#0d1f1c" stroke="#2dd4bf" stroke-width="1.5"/>
+<text x="0" y="24.3" font-size="15" fill="#5eead4" text-anchor="middle">images</text>
+<rect x="112" y="0" width="152" height="38" rx="4" fill="#0d1f1c" stroke="#2dd4bf" stroke-width="1.5"/>
+<text x="188" y="24.3" font-size="15" fill="#5eead4" text-anchor="middle">containers</text>
+<rect x="300" y="0" width="152" height="38" rx="4" fill="#0d1f1c" stroke="#2dd4bf" stroke-width="1.5"/>
+<text x="376" y="24.3" font-size="15" fill="#5eead4" text-anchor="middle">lockfiles</text>
+<rect x="-76" y="92" width="152" height="38" rx="4" fill="#0f2e1b" stroke="#4ade80" stroke-width="2.5"/>
+<text x="0" y="116.3" font-size="15" fill="#86efac" text-anchor="middle" font-weight="bold">report</text>
+<text x="8" y="82.5" font-size="12" fill="#d1d5db">scan</text>
+<text x="92" y="115.2" font-size="12" fill="#8b949e">per target: trusted, not trusted, or failed</text>
+</svg>
