@@ -1,5 +1,5 @@
 type: '@taylor/swamp-diagrams/diagram'
-typeVersion: 2026.11.06.2
+typeVersion: 2026.11.06.3
 id: d039b8b7-04c6-4443-9dd2-1f0fab06dace
 name: swampworks-docs
 version: 1
@@ -9,7 +9,7 @@ globalArguments:
   direction: TD
   render: none
   outputDir: ''
-  embedIn: ../docs
+  embedIn: ..
   copyFiles:
     - mmd
     - md

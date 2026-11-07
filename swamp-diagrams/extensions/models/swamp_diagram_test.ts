@@ -526,3 +526,26 @@ Deno.test("workflows whose names share a diagram name are refused", async () => 
     await Deno.remove(dir, { recursive: true });
   }
 });
+
+Deno.test("embed leaves markers inside code blocks alone", () => {
+  const doc = [
+    "Put a marker pair where a diagram belongs:",
+    "",
+    "```markdown",
+    "<!-- swamp-diagram: a -->",
+    "<!-- /swamp-diagram -->",
+    "```",
+    "",
+    "<!-- swamp-diagram: a -->",
+    "<!-- /swamp-diagram -->",
+    "",
+  ].join("\n");
+  const out = embed(doc, "a", "flowchart TD");
+  assertStringIncludes(
+    out,
+    "```markdown\n<!-- swamp-diagram: a -->\n<!-- /swamp-diagram -->\n```",
+  );
+  assertEquals(out.split("```mermaid").length, 2);
+  const example = doc.split("\n").slice(0, 7).join("\n");
+  assertEquals(embed(example, "a", "x"), example);
+});

@@ -112,13 +112,13 @@ export function nodeId(prefix: string, text: string): string {
 export function frontmatter(title: string, theme: Theme): string[] {
   const lines = ["---", `title: ${JSON.stringify(title)}`];
   if (theme === "auto") {
-    // No base theme, so the viewer's light or dark one applies; only the
-    // font, straight edges and spacing are set.
+    // No base theme, so the viewer's light or dark one applies; only straight
+    // edges and spacing are set. The font is left to the viewer too: a font
+    // the renderer hasn't loaded when it measures labels clips them.
     lines.push(
       "config:",
-      "  themeVariables:",
-      `    fontFamily: "ui-monospace, SFMono-Regular, Menlo, monospace"`,
       "  flowchart:",
+      "    padding: 20",
       "    curve: linear",
       "    nodeSpacing: 40",
       "    rankSpacing: 45",
@@ -171,7 +171,9 @@ export function classDefs(theme: Theme): string[] {
     },stroke-width:1.5px${extra}`;
   return [
     role("state", p.node),
-    role("highlight", p.highlight, ",stroke-width:3px,font-weight:bold"),
+    // No bold: Mermaid sizes boxes before class styles apply, so bold text
+    // would overflow its box. A thicker border does the emphasis.
+    role("highlight", p.highlight, ",stroke-width:3px"),
     role("failure", p.failure),
     `  classDef dot fill:${p.edge},stroke:${p.edge},color:${p.edge}`,
     role("dashed", p.node, ",stroke-dasharray:5 3"),
@@ -225,16 +227,49 @@ export function toMarkdown(
 const BEGIN = /<!--\s*swamp-diagram:\s*([A-Za-z0-9_.-]+)\s*-->/g;
 const END = "<!-- /swamp-diagram -->";
 
+/** Character ranges of fenced code blocks (``` or ~~~), so markers shown as examples are ignored. */
+function fencedRanges(text: string): [number, number][] {
+  const ranges: [number, number][] = [];
+  let open: { at: number; fence: string } | undefined;
+  let pos = 0;
+  for (const line of text.split("\n")) {
+    const m = /^\s{0,3}(`{3,}|~{3,})/.exec(line);
+    if (m) {
+      if (!open) open = { at: pos, fence: m[1] };
+      else if (m[1][0] === open.fence[0] && m[1].length >= open.fence.length) {
+        ranges.push([open.at, pos + line.length]);
+        open = undefined;
+      }
+    }
+    pos += line.length + 1;
+  }
+  if (open) ranges.push([open.at, text.length]);
+  return ranges;
+}
+
+/** The `swamp-diagram` start markers for `name` outside code blocks. */
+function markers(text: string, name: string): RegExpMatchArray[] {
+  const fenced = fencedRanges(text);
+  return [...text.matchAll(BEGIN)].filter((m) =>
+    m[1] === name && !fenced.some(([a, b]) => m.index! >= a && m.index! < b)
+  );
+}
+
+/** Whether `text` has a `swamp-diagram` block for `name` (outside code blocks). */
+export function hasBlock(text: string, name: string): boolean {
+  return markers(text, name).length > 0;
+}
+
 /**
  * Replace the body of every `<!-- swamp-diagram: <name> -->` …
  * `<!-- /swamp-diagram -->` block for `name` in `text` with a fenced mermaid
- * block. Returns the text unchanged when it has no such block.
+ * block. Markers inside code blocks are examples and are left alone. Returns
+ * the text unchanged when it has no such block.
  */
 export function embed(text: string, name: string, mermaid: string): string {
   let out = "";
   let last = 0;
-  for (const m of text.matchAll(BEGIN)) {
-    if (m[1] !== name) continue;
+  for (const m of markers(text, name)) {
     const start = m.index! + m[0].length;
     const end = text.indexOf(END, start);
     if (end < 0) throw new Error(`swamp-diagram: ${name} has no ${END}`);

@@ -11,9 +11,8 @@ be skipped. See the [legend](legend.md) for what the shapes and colours mean.
 ---
 title: "@swamp/issue-lifecycle"
 config:
-  themeVariables:
-    fontFamily: "ui-monospace, SFMono-Regular, Menlo, monospace"
   flowchart:
+    padding: 20
     curve: linear
     nodeSpacing: 40
     rankSpacing: 45
@@ -49,7 +48,7 @@ flowchart TD
   st_notify -->|"notify / skip_notify"| st_summarizing
   st_summarizing -->|"summarize"| st_done
   classDef state fill:transparent,stroke:#14b8a6,stroke-width:1.5px
-  classDef highlight fill:#22c55e33,stroke:#22c55e,stroke-width:1.5px,stroke-width:3px,font-weight:bold
+  classDef highlight fill:#22c55e33,stroke:#22c55e,stroke-width:1.5px,stroke-width:3px
   classDef failure fill:#ef444426,stroke:#ef4444,stroke-width:1.5px
   classDef dot fill:#3b82f6,stroke:#3b82f6,color:#3b82f6
   classDef dashed fill:transparent,stroke:#14b8a6,stroke-width:1.5px,stroke-dasharray:5 3

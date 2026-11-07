@@ -20,6 +20,7 @@ rendered to SVG or PNG for anywhere else.
 title: "@swamp/issue-lifecycle (excerpt)"
 config:
   flowchart:
+    padding: 20
     curve: linear
 ---
 flowchart TD
@@ -34,7 +35,7 @@ flowchart TD
   st_pr_open -->|"pr_failed"| st_pr_failed
   st_pr_failed -->|"implement (retry)"| st_implementing
   classDef state fill:transparent,stroke:#14b8a6,stroke-width:1.5px
-  classDef highlight fill:#22c55e33,stroke:#22c55e,stroke-width:3px,font-weight:bold
+  classDef highlight fill:#22c55e33,stroke:#22c55e,stroke-width:3px
   classDef failure fill:#ef444426,stroke:#ef4444,stroke-width:1.5px
   linkStyle 0 stroke:#22c55e,stroke-width:3px
   linkStyle 1 stroke:#3b82f6,stroke-width:1.5px
@@ -156,8 +157,11 @@ swamp data query 'modelName == "diagrams" && name == "state-machine-swamp-issue-
   --select content
 ```
 
-[swampworks/docs](https://github.com/taylorific/swampworks/tree/main/docs) is
-kept up to date this way.
+In [swampworks](https://github.com/taylorific/swampworks), each extension's
+`docs/` folder (for example
+[libvirt/docs](https://github.com/taylorific/swampworks/tree/main/libvirt/docs))
+is kept up to date this way, by one definition with `embedIn=..` and
+`scripts/update-diagrams.sh`.
 
 ## License
 
