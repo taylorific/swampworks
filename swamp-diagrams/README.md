@@ -1,64 +1,44 @@
 # swamp-diagrams
 
 A [swamp](https://swamp.club/) extension that draws diagrams of swamp workflows
-and of behaviors' state machines, as [Mermaid](https://mermaid.js.org/).
+and of behaviors' state machines.
 
-- `workflow` draws workflows as flowcharts: a box per job, a node per step, and
-  `dependsOn` arrows labelled with their condition.
+- `workflow` draws workflows: a frame per job, a box per step, and `dependsOn`
+  arrows labelled with their condition.
 - `stateMachine` draws a behavior's phases and the methods that move between
   them, from the transition lines in a published extension's description (as
   [@swamp/issue-lifecycle](https://swamp-club.com/extensions/@swamp/issue-lifecycle)
   has) or from lines you pass in.
 
-GitHub draws Mermaid in Markdown itself, so the default `auto` theme leaves the
-base colours to the reader's light or dark mode and only adds colours that read
-on both. Diagrams can be written straight into marked blocks in your docs, and
-rendered to SVG or PNG for anywhere else.
+By default each diagram is a light and a dark SVG with a fixed layout: the main
+path runs straight down the middle, failures sit beside the phase that leads to
+them, retries curve back up, loops are arcs on the left, and notes sit beside
+their box. Text is monospace, so every box is sized to its label without a
+browser. Diagrams are written straight into marked blocks in your docs as a
+`<picture>` that follows the reader's light or dark theme. Set `format=mermaid`
+for Mermaid instead, which GitHub draws itself.
 
-```mermaid
----
-title: "@swamp/issue-lifecycle (excerpt)"
-config:
-  flowchart:
-    padding: 20
-    curve: linear
----
-flowchart TD
-  st_plan_generated("plan_generated<br/><small>↺ iterate</small>"):::state
-  st_approved("approved"):::highlight
-  st_implementing("implementing"):::state
-  st_pr_open("pr_open<br/><small>↺ link_pr</small>"):::state
-  st_pr_failed("pr_failed"):::failure
-  st_plan_generated ==>|"approve"| st_approved
-  st_approved -->|"implement"| st_implementing
-  st_implementing -->|"link_pr"| st_pr_open
-  st_pr_open -->|"pr_failed"| st_pr_failed
-  st_pr_failed -->|"implement (retry)"| st_implementing
-  classDef state fill:transparent,stroke:#14b8a6,stroke-width:1.5px
-  classDef highlight fill:#22c55e33,stroke:#22c55e,stroke-width:3px
-  classDef failure fill:#ef444426,stroke:#ef4444,stroke-width:1.5px
-  linkStyle 0 stroke:#22c55e,stroke-width:3px
-  linkStyle 1 stroke:#3b82f6,stroke-width:1.5px
-  linkStyle 2 stroke:#3b82f6,stroke-width:1.5px
-  linkStyle 3 stroke:#ef4444,stroke-width:1.5px
-  linkStyle 4 stroke:#ef4444,stroke-width:1.5px
-```
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="https://raw.githubusercontent.com/taylorific/swampworks/main/swamp-diagrams/docs/diagrams/state-machine-swamp-issue-lifecycle-dark.svg">
+  <img alt="@swamp/issue-lifecycle" src="https://raw.githubusercontent.com/taylorific/swampworks/main/swamp-diagrams/docs/diagrams/state-machine-swamp-issue-lifecycle-light.svg">
+</picture>
 
 ## Behavior
 
 `@taylor/swamp-diagrams/diagram`:
 
-| Global argument | Default                               | Description                                                                                                             |
-| --------------- | ------------------------------------- | ----------------------------------------------------------------------------------------------------------------------- |
-| `theme`         | `auto`                                | `auto` (reads in light and dark mode), `dark`, `light`, `both` (auto source, images as a `-dark`/`-light` pair), `none` |
-| `direction`     | `TD`                                  | `TD` (top-down) or `LR` (left-to-right)                                                                                 |
-| `embedIn`       |                                       | Markdown file or folder whose `swamp-diagram` blocks get the diagram                                                    |
-| `render`        | `none`                                | Also render `svg` or `png` with the mermaid-cli container (needs Docker)                                                |
-| `outputDir`     |                                       | Folder, relative to the repository, to also copy the diagram files into                                                 |
-| `copyFiles`     | `["mmd", "md", "image"]`              | Which files to copy into `outputDir`                                                                                    |
-| `registryUrl`   | `https://swamp-club.com`              | Registry that `stateMachine` reads extension descriptions from                                                          |
-| `dockerPath`    | `docker`                              | Docker CLI binary                                                                                                       |
-| `mermaidImage`  | `minlag/mermaid-cli:11.12.0@sha256:…` | mermaid-cli image, pinned by digest                                                                                     |
+| Global argument | Default                               | Description                                                                                                              |
+| --------------- | ------------------------------------- | ------------------------------------------------------------------------------------------------------------------------ |
+| `format`        | `svg`                                 | `svg` (a light and dark SVG pair with the fixed layout) or `mermaid`                                                     |
+| `theme`         | `auto`                                | Mermaid only: `auto` (reads in light and dark mode), `dark`, `light`, `both` (images as a `-dark`/`-light` pair), `none` |
+| `direction`     | `TD`                                  | `TD` (top-down) or `LR` (left-to-right)                                                                                  |
+| `embedIn`       |                                       | Markdown file or folder whose `swamp-diagram` blocks get the diagram                                                     |
+| `render`        | `none`                                | Mermaid only: also render `svg` or `png` with the mermaid-cli container (needs Docker)                                   |
+| `outputDir`     |                                       | Folder, relative to the repository, to also copy the diagram files into                                                  |
+| `copyFiles`     | `["mmd", "md", "image"]`              | Which files to copy into `outputDir`                                                                                     |
+| `registryUrl`   | `https://swamp-club.com`              | Registry that `stateMachine` reads extension descriptions from                                                           |
+| `dockerPath`    | `docker`                              | Docker CLI binary                                                                                                        |
+| `mermaidImage`  | `minlag/mermaid-cli:11.12.0@sha256:…` | mermaid-cli image, pinned by digest                                                                                      |
 
 | Method         | What it does                                                                                                                   |
 | -------------- | ------------------------------------------------------------------------------------------------------------------------------ |
@@ -66,9 +46,9 @@ flowchart TD
 | `stateMachine` | Draw a behavior's phases from `extension` (its registry description) or from `transitions` text                                |
 
 Each run writes a `diagram` resource (the Mermaid source, what it was drawn
-from, and where it was copied or embedded) and `mermaid` and `markdown` files,
-plus `image` files when rendering. Diagrams are named `workflow-<name>` and
-`state-machine-<extension>`.
+from, and where it was copied or embedded), `mermaid` and `markdown` files, and
+`image` files: the SVG pair, or mermaid-cli's render. Diagrams are named
+`workflow-<name>` and `state-machine-<extension>`.
 
 ### Diagrams in your docs
 
@@ -80,16 +60,22 @@ Put a marker pair where a diagram belongs:
 ```
 
 With `embedIn` set to the file or folder, each run replaces what's between the
-markers with the current diagram in a `mermaid` code block, and leaves the prose
-around them alone. A run that changes nothing leaves the file untouched.
+markers with the current diagram and leaves the prose around them alone. With
+`format=svg` that is a `<picture>` of the pair, saved as
+`diagrams/<name>-dark.svg` and `-light.svg` beside the page; with
+`format=mermaid` it is a `mermaid` code block. Markers inside code blocks, like
+the ones above, are left alone, and a run that changes nothing leaves every file
+untouched.
 
 ### Workflows
 
-Steps show the behavior and method they run, and a job's worker labels say where
-it runs. Manual approvals and signal waits are green hexagons, nested workflows
-are double-sided boxes, and steps with `allowFailure` have a dashed border. A
-`failed` dependency is a red arrow; `completed` and other conditions are dotted
-grey arrows with the condition as the label.
+Each step has the behavior and method it runs beside its box, and each job's
+frame says which worker runs it. Steps a person acts on (manual approvals,
+signal waits) are green, steps that run another workflow have a double border,
+and steps with `allowFailure` a dashed one. A `failed` dependency is a red
+arrow; `completed` and other conditions are dashed grey arrows labelled with the
+condition. (In Mermaid, approvals are hexagons and nested workflows double-sided
+boxes.)
 
 ### State machines
 
@@ -102,9 +88,9 @@ plan_generated ──[iterate]──> plan_generated  (feedback loop)
 
 ASCII arrows (`a --[method]--> b`) work too, and lines that don't match are
 ignored, so a whole description or README can be passed in. A method that keeps
-a phase where it is shows as `↺ method` in the phase's box. Steps back to an
-earlier phase are red and labelled `(retry)`, phases whose name contains `fail`
-are red, and final phases are green.
+a phase where it is is an amber loop beside the phase (in Mermaid, a `↺ method`
+line in its box). Steps back to an earlier phase are red and labelled `(retry)`,
+phases whose name contains `fail` are red, and final phases are green.
 
 | Argument          | Description                                                                           |
 | ----------------- | ------------------------------------------------------------------------------------- |
@@ -143,12 +129,12 @@ swamp behavior run diagrams stateMachine \
   --input 'omitMethods=["complete"]'
 ```
 
-For an image instead, add `--global-arg render=svg` (or `png`) and
-`--global-arg outputDir=<folder>`; `theme=both` renders a `-dark` and `-light`
-pair for a `<picture>` element. Rendering runs the digest-pinned mermaid-cli
-image with Docker, the extension's only subprocess; a `docker-available`
-pre-flight check stops the run early, with a clear message, when Docker isn't
-there or its daemon isn't running.
+To copy the files somewhere else as well, set `--global-arg outputDir=<folder>`.
+With `format=mermaid`, `--global-arg render=svg` (or `png`) also renders
+Mermaid's own image; rendering runs the digest-pinned mermaid-cli image with
+Docker, the extension's only subprocess; a `docker-available` pre-flight check
+stops the run early, with a clear message, when Docker isn't there or its daemon
+isn't running.
 
 Read a diagram back:
 

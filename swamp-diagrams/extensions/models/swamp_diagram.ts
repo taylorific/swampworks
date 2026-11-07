@@ -1,21 +1,26 @@
 import { z } from "npm:zod@4";
-import { join, relative, resolve } from "jsr:@std/path@1.0.8";
+import { dirname, join, relative, resolve } from "jsr:@std/path@1.0.8";
 import {
   background,
   embed,
   hasBlock,
+  mermaidBlock,
+  pictureBlock,
   type Theme,
   toMarkdown,
 } from "./_lib/mermaid.ts";
+import { renderSvg } from "./_lib/svg.ts";
 import {
   parseTransitions,
   renderStateMachine,
+  stateMachineGraph,
   type Transition,
 } from "./_lib/state_machine.ts";
 import {
   parseWorkflow,
   renderWorkflow,
   type WorkflowDoc,
+  workflowGraph,
 } from "./_lib/workflow.ts";
 
 // Diagrams of swamp workflows and of behaviors' state machines, written as
@@ -30,15 +35,20 @@ import {
 // them from a published extension's registry description (as
 // @swamp/issue-lifecycle has) or from text you pass in.
 //
-// Every diagram is stored as a .mmd file and a Markdown file with a fenced
-// mermaid block (GitHub renders it). It can also be written into marked
-// blocks in Markdown docs (embedIn), rendered to SVG or PNG with the
-// mermaid-cli container, and copied into a folder in the repository.
+// format svg (the default) draws each diagram itself as a light and a dark
+// SVG with a fixed layout: the main path straight down the middle, failures
+// beside it, retries curving back up, loops and notes beside their boxes.
+// format mermaid writes Mermaid instead, which GitHub draws itself. Either is
+// written into marked blocks in Markdown docs (embedIn), stored as data, and
+// can be copied into a folder in the repository.
 
 const MERMAID_CLI =
   "minlag/mermaid-cli:11.12.0@sha256:bad64c9d9ad917c8dfbe9d9e9c162b96f6615ff019b37058638d16eb27ce7783";
 
 const GlobalArgsSchema = z.object({
+  format: z.enum(["svg", "mermaid"]).default("svg").describe(
+    "svg: a light and dark SVG pair drawn with a fixed, hand-drawn-style layout, shown with a <picture> element; mermaid: Mermaid source that GitHub draws itself",
+  ),
   theme: z.enum(["auto", "dark", "light", "both", "none"]).default("auto")
     .describe(
       "Colours: auto (reads on light and dark pages; GitHub draws it in the reader's mode), dark (teal on black), light, both (auto source, images rendered as a -dark and -light pair), or none (Mermaid's default theme, no colours)",
@@ -47,13 +57,13 @@ const GlobalArgsSchema = z.object({
     "Layout: TD (top-down) or LR (left-to-right)",
   ),
   render: z.enum(["none", "svg", "png"]).default("none").describe(
-    "Also render an image with the mermaid-cli container (needs Docker)",
+    "format mermaid only: also render an image with the mermaid-cli container (needs Docker)",
   ),
   outputDir: z.string().default("").describe(
     "Folder, relative to the repository, to also copy the diagram files into (empty = keep them in swamp data only)",
   ),
   embedIn: z.string().default("").describe(
-    "Markdown file or folder, relative to the repository, whose <!-- swamp-diagram: <name> --> … <!-- /swamp-diagram --> blocks get the diagram as a mermaid code block (empty = none)",
+    "Markdown file or folder, relative to the repository, whose <!-- swamp-diagram: <name> --> … <!-- /swamp-diagram --> blocks get the diagram: a <picture> of the SVG pair (saved in a diagrams/ folder beside the Markdown file) or a mermaid code block (empty = none)",
   ),
   copyFiles: z.array(z.enum(["mmd", "md", "image"])).default([
     "mmd",
@@ -102,7 +112,7 @@ const StateMachineArgsSchema = z.object({
     "Diagram title (defaults to the extension name)",
   ),
   subtitle: z.string().default("").describe(
-    "A line shown under the title in the Markdown file",
+    "A line shown under the title",
   ),
   hideStates: z.array(z.string()).default([]).describe(
     "Phases to leave out; their transitions become entry or exit arrows (e.g. created)",
@@ -234,9 +244,9 @@ const dockerRenderer: Renderer = async (mermaid, format, g) => {
 
 /** Whether Docker can render, when rendering is asked for at all. */
 export async function dockerAvailable(
-  g: Pick<GlobalArgs, "render" | "dockerPath">,
+  g: Pick<GlobalArgs, "render" | "dockerPath"> & { format?: string },
 ): Promise<{ pass: boolean; errors?: string[] }> {
-  if (g.render === "none") return { pass: true };
+  if (g.render === "none" || g.format === "svg") return { pass: true };
   const fail = (why: string) => ({
     pass: false,
     errors: [
@@ -267,13 +277,19 @@ async function save(
   context: Context,
   instance: string,
   record: Omit<Diagram, "copiedTo" | "embeddedIn" | "generatedAt" | "mermaid">,
-  draw: (theme: Theme) => string,
+  draw: {
+    mermaid: (theme: Theme) => string;
+    svg: (mode: "dark" | "light") => string;
+  },
   note: string | undefined,
   renderer: Renderer,
 ): Promise<{ name: string }[]> {
   const g = context.globalArgs;
   const sourceTheme: Theme = g.theme === "both" ? "auto" : g.theme;
-  const mermaid = draw(sourceTheme);
+  const mermaid = draw.mermaid(sourceTheme);
+  const svgs = g.format === "svg"
+    ? { dark: draw.svg("dark"), light: draw.svg("light") }
+    : undefined;
   const markdown = toMarkdown(record.title, mermaid, note);
   const handles = [
     await context.createFileWriter("mermaid", `${instance}-mmd`).writeText(
@@ -286,14 +302,25 @@ async function save(
   const outputs: [string, Uint8Array | string][] = [];
   if (g.copyFiles.includes("mmd")) outputs.push([`${instance}.mmd`, mermaid]);
   if (g.copyFiles.includes("md")) outputs.push([`${instance}.md`, markdown]);
-  if (g.render !== "none") {
+  if (svgs) {
+    for (const mode of ["dark", "light"] as const) {
+      handles.push(
+        await context.createFileWriter("image", `${instance}-${mode}-svg`, {
+          contentType: "image/svg+xml",
+        }).writeText(svgs[mode]),
+      );
+      if (g.copyFiles.includes("image")) {
+        outputs.push([`${instance}-${mode}.svg`, svgs[mode]]);
+      }
+    }
+  } else if (g.render !== "none") {
     // theme both: a -dark and -light pair; otherwise one image.
     const variants: [string, Theme][] = g.theme === "both"
       ? [["-dark", "dark"], ["-light", "light"]]
       : [["", g.theme]];
     for (const [suffix, theme] of variants) {
       const image = await renderer(
-        theme === sourceTheme ? mermaid : draw(theme),
+        theme === sourceTheme ? mermaid : draw.mermaid(theme),
         g.render,
         { ...g, theme },
       );
@@ -328,7 +355,21 @@ async function save(
       const path of await markdownFiles(resolve(context.repoDir, g.embedIn))
     ) {
       const text = await Deno.readTextFile(path);
-      const next = embed(text, instance, mermaid);
+      if (!hasBlock(text, instance)) continue;
+      let body = mermaidBlock(mermaid);
+      if (svgs) {
+        // The pair goes in a diagrams/ folder beside the page.
+        const dir = join(dirname(path), "diagrams");
+        await Deno.mkdir(dir, { recursive: true });
+        for (const mode of ["dark", "light"] as const) {
+          const file = join(dir, `${instance}-${mode}.svg`);
+          const old = await Deno.readTextFile(file).catch(() => "");
+          if (old !== svgs[mode]) await Deno.writeTextFile(file, svgs[mode]);
+          copiedTo.push(relative(context.repoDir, file));
+        }
+        body = pictureBlock(`diagrams/${instance}`, record.title);
+      }
+      const next = embed(text, instance, body);
       if (next === text) {
         if (hasBlock(text, instance)) {
           embeddedIn.push(relative(context.repoDir, path));
@@ -359,7 +400,7 @@ async function save(
     nodes: record.nodes,
     edges: record.edges,
     where: [
-      copiedTo.length ? `, copied to ${g.outputDir}` : "",
+      g.outputDir && copiedTo.length ? `, copied to ${g.outputDir}` : "",
       embeddedIn.length ? `, embedded in ${embeddedIn.join(", ")}` : "",
     ].join(""),
   });
@@ -478,7 +519,7 @@ export const model = {
     {
       toVersion: "2026.11.06.3",
       description:
-        "Ignores swamp-diagram markers inside code blocks, and stops labels clipping on GitHub (no custom font or bold, more padding); no settings changed",
+        "Adds format svg, now the default: a light and dark SVG pair with a fixed, hand-drawn-style layout (set format=mermaid to keep Mermaid). Also ignores swamp-diagram markers inside code blocks and stops Mermaid labels clipping on GitHub; existing settings are kept",
       upgradeAttributes: (old: Record<string, unknown>) => old,
     },
   ],
@@ -583,7 +624,11 @@ export const model = {
                 nodes: d.steps,
                 edges,
               },
-              (theme) => draw(theme).mermaid,
+              {
+                mermaid: (theme) => draw(theme).mermaid,
+                svg: (mode) =>
+                  renderSvg(workflowGraph(doc, args.title || undefined), mode),
+              },
               doc.description?.trim(),
               args._render ?? dockerRenderer,
             ),
@@ -626,20 +671,21 @@ export const model = {
         }
         const name = args.extension || args.title || "state-machine";
         const title = args.title || args.extension || "State machine";
+        const options = (theme: Theme) => ({
+          title,
+          theme,
+          direction: g.direction,
+          hideStates: args.hideStates,
+          collapseStates: args.collapseStates,
+          omitMethods: args.omitMethods,
+          humanGates: args.humanGates,
+          highlightStates: args.highlightStates,
+          failureStates: args.failureStates,
+          notes: args.notes,
+          showComments: args.showComments,
+        });
         const draw = (theme: Theme) =>
-          renderStateMachine(transitions, {
-            title,
-            theme,
-            direction: g.direction,
-            hideStates: args.hideStates,
-            collapseStates: args.collapseStates,
-            omitMethods: args.omitMethods,
-            humanGates: args.humanGates,
-            highlightStates: args.highlightStates,
-            failureStates: args.failureStates,
-            notes: args.notes,
-            showComments: args.showComments,
-          });
+          renderStateMachine(transitions, options(theme));
         const d = draw("none");
         const handles = await save(
           context,
@@ -652,7 +698,17 @@ export const model = {
             nodes: d.states.length,
             edges: d.transitions,
           },
-          (theme) => draw(theme).mermaid,
+          {
+            mermaid: (theme) => draw(theme).mermaid,
+            svg: (mode) =>
+              renderSvg(
+                stateMachineGraph(transitions, {
+                  ...options("none"),
+                  subtitle: args.subtitle || undefined,
+                }),
+                mode,
+              ),
+          },
           args.subtitle || undefined,
           args._render ?? dockerRenderer,
         );

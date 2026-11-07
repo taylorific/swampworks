@@ -1,0 +1,38 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="-174.4 -152 609.6 744" width="610" height="744" font-family="ui-monospace, SFMono-Regular, Menlo, Consolas, 'Liberation Mono', monospace" role="img" aria-label="@taylor/slidev-new-deck">
+<defs><marker id="arrow-normal" viewBox="0 0 10 10" refX="9" refY="5" markerUnits="userSpaceOnUse" markerWidth="10" markerHeight="10" orient="auto-start-reverse"><path d="M0,1 L10,5 L0,9 z" fill="#2563eb"/></marker><marker id="arrow-human" viewBox="0 0 10 10" refX="9" refY="5" markerUnits="userSpaceOnUse" markerWidth="10" markerHeight="10" orient="auto-start-reverse"><path d="M0,1 L10,5 L0,9 z" fill="#16a34a"/></marker><marker id="arrow-fail" viewBox="0 0 10 10" refX="9" refY="5" markerUnits="userSpaceOnUse" markerWidth="10" markerHeight="10" orient="auto-start-reverse"><path d="M0,1 L10,5 L0,9 z" fill="#dc2626"/></marker><marker id="arrow-loop" viewBox="0 0 10 10" refX="9" refY="5" markerUnits="userSpaceOnUse" markerWidth="10" markerHeight="10" orient="auto-start-reverse"><path d="M0,1 L10,5 L0,9 z" fill="#d97706"/></marker><marker id="arrow-skip" viewBox="0 0 10 10" refX="9" refY="5" markerUnits="userSpaceOnUse" markerWidth="10" markerHeight="10" orient="auto-start-reverse"><path d="M0,1 L10,5 L0,9 z" fill="#8c959f"/></marker></defs>
+<text x="130.4" y="-104" font-size="24" font-weight="bold" fill="#15803d" text-anchor="middle">@taylor/slidev-new-deck</text>
+<rect x="-99" y="0" width="458.8" height="568" rx="8" fill="none" stroke="#d0d7de" stroke-width="1" stroke-dasharray="4 4"/>
+<path d="M0,84 V138" fill="none" stroke="#2563eb" stroke-width="1.5" marker-end="url(#arrow-normal)"/>
+<path d="M0,176 V230" fill="none" stroke="#2563eb" stroke-width="1.5" marker-end="url(#arrow-normal)"/>
+<path d="M0,268 V322" fill="none" stroke="#2563eb" stroke-width="1.5" marker-end="url(#arrow-normal)"/>
+<path d="M0,360 V414" fill="none" stroke="#2563eb" stroke-width="1.5" marker-end="url(#arrow-normal)"/>
+<path d="M0,452 V506" fill="none" stroke="#2563eb" stroke-width="1.5" marker-end="url(#arrow-normal)"/>
+<rect x="-75" y="46" width="150" height="38" rx="4" fill="#f0fdfa" stroke="#0d9488" stroke-width="1.5"/>
+<text x="0" y="70.3" font-size="15" fill="#115e59" text-anchor="middle">init</text>
+<rect x="-75" y="138" width="150" height="38" rx="4" fill="#f0fdfa" stroke="#0d9488" stroke-width="1.5"/>
+<text x="0" y="162.3" font-size="15" fill="#115e59" text-anchor="middle">scaffold</text>
+<rect x="-75" y="230" width="150" height="38" rx="4" fill="#f0fdfa" stroke="#0d9488" stroke-width="1.5"/>
+<text x="0" y="254.3" font-size="15" fill="#115e59" text-anchor="middle">build</text>
+<rect x="-75" y="322" width="150" height="38" rx="4" fill="#f0fdfa" stroke="#0d9488" stroke-width="1.5"/>
+<text x="0" y="346.3" font-size="15" fill="#115e59" text-anchor="middle">repo</text>
+<rect x="-75" y="414" width="150" height="38" rx="4" fill="#f0fdfa" stroke="#0d9488" stroke-width="1.5"/>
+<text x="0" y="438.3" font-size="15" fill="#115e59" text-anchor="middle">pages</text>
+<rect x="-75" y="506" width="150" height="38" rx="4" fill="#f0fdfa" stroke="#0d9488" stroke-width="1.5"/>
+<text x="0" y="530.3" font-size="15" fill="#115e59" text-anchor="middle">push</text>
+<text x="10" y="115" font-size="12" fill="#24292f"></text>
+<text x="10" y="207" font-size="12" fill="#24292f"></text>
+<text x="10" y="299" font-size="12" fill="#24292f"></text>
+<text x="10" y="391" font-size="12" fill="#24292f"></text>
+<text x="10" y="483" font-size="12" fill="#24292f"></text>
+<text x="91" y="69.2" font-size="12" fill="#57606a">deck-${{ inputs.name }} · init</text>
+<text x="91" y="161.2" font-size="12" fill="#57606a">deck-${{ inputs.name }} · scaffold</text>
+<text x="91" y="253.2" font-size="12" fill="#57606a">deck-${{ inputs.name }} · build</text>
+<text x="91" y="345.2" font-size="12" fill="#57606a">repo-${{ inputs.name }} · ensure</text>
+<text x="91" y="437.2" font-size="12" fill="#57606a">pages-${{ inputs.name }} · ensure</text>
+<text x="91" y="529.2" font-size="12" fill="#57606a">deck-${{ inputs.name }} · push</text>
+<text x="-85" y="22" font-size="12" fill="#57606a">new-deck</text>
+<text x="130.4" y="-79" font-size="13" fill="#57606a" text-anchor="middle">Create a Slidev deck from the template, add page numbers, a Pages deploy</text>
+<text x="130.4" y="-60" font-size="13" fill="#57606a" text-anchor="middle">workflow, README, LICENSE and a starter slides.md, check it builds,</text>
+<text x="130.4" y="-41" font-size="13" fill="#57606a" text-anchor="middle">create its GitHub repository, set Pages to build from GitHub Actions,</text>
+<text x="130.4" y="-22" font-size="13" fill="#57606a" text-anchor="middle">and push it</text>
+</svg>

@@ -22,6 +22,7 @@ import {
   nodeLabel,
   type Theme,
 } from "./mermaid.ts";
+import { type Graph, GRAPH_END, GRAPH_START, type GraphNode } from "./graph.ts";
 
 /** One transition: running `method` in phase `from` moves to phase `to`. */
 export interface Transition {
@@ -121,11 +122,19 @@ export function collapse(
   return out;
 }
 
-/** Draw the transitions as a Mermaid flowchart. */
-export function renderStateMachine(
+/** The phases and edges to draw, after hiding, collapsing and omitting. */
+interface Analysis {
+  states: string[];
+  edges: Edge[];
+  isFailure: (s: string) => boolean;
+  finals: Set<string>;
+  kept: Transition[];
+}
+
+function analyse(
   transitions: Transition[],
   opts: StateMachineOptions,
-): StateMachineDiagram {
+): Analysis {
   if (transitions.length === 0) {
     throw new Error(
       "No transitions found. Expected lines like 'created ──[start]──> triaging'",
@@ -214,6 +223,47 @@ export function renderStateMachine(
     } else edges.push({ from, to, labels: [label], role });
   }
 
+  return { states, edges, isFailure, finals, kept };
+}
+
+/** The state machine as a graph, for the SVG renderer. */
+export function stateMachineGraph(
+  transitions: Transition[],
+  opts: StateMachineOptions & { subtitle?: string },
+): Graph {
+  const { states, edges, isFailure, finals } = analyse(transitions, opts);
+  const nodes: GraphNode[] = states.map((s) => ({
+    id: s,
+    label: s,
+    note: opts.notes[s],
+    loop: edges.filter((e) => e.role === "loop" && e.from === s)
+      .flatMap((e) => e.labels),
+    kind: isFailure(s)
+      ? "failure"
+      : finals.has(s) || opts.highlightStates.includes(s)
+      ? "highlight"
+      : "normal",
+  }));
+  return {
+    title: opts.title,
+    subtitle: opts.subtitle,
+    groups: [{ nodes }],
+    edges: edges.filter((e) => e.role !== "loop").map((e) => ({
+      from: e.from === START ? GRAPH_START : e.from,
+      to: e.to === END ? GRAPH_END : e.to,
+      label: e.labels.join(" / "),
+      role: e.role,
+      back: e.labels.some((l) => l.endsWith("(retry)")),
+    })),
+  };
+}
+
+/** Draw the transitions as a Mermaid flowchart. */
+export function renderStateMachine(
+  transitions: Transition[],
+  opts: StateMachineOptions,
+): StateMachineDiagram {
+  const { states, edges, isFailure, finals, kept } = analyse(transitions, opts);
   const id = (s: string) => s === START || s === END ? s : nodeId("st", s);
   const lines = [...frontmatter(opts.title, opts.theme)];
   lines.push(`flowchart ${opts.direction}`);

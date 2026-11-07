@@ -15,4 +15,5 @@ swamp behavior run swampworks-docs stateMachine \
   --input 'hideStates=["created"]' \
   --input 'collapseStates=["verifying"]' \
   --input 'omitMethods=["complete"]' \
+  --input 'subtitle=a typed state machine — every transition is validated' \
   --input 'notes={"triaging":"reads CLAUDE.md + design + skills","classified":"bug · feature · security","implementing":"under CLAUDE.md","pr_open":"CI · 5 merge gates","notify":"thanks contributor","done":"auto-merged & shipped"}'

@@ -1,0 +1,32 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="-336.8 -133 655.6 469" width="656" height="469" font-family="ui-monospace, SFMono-Regular, Menlo, Consolas, 'Liberation Mono', monospace" role="img" aria-label="@taylor/kvm-host-apply-ssh">
+<defs><marker id="arrow-normal" viewBox="0 0 10 10" refX="9" refY="5" markerUnits="userSpaceOnUse" markerWidth="10" markerHeight="10" orient="auto-start-reverse"><path d="M0,1 L10,5 L0,9 z" fill="#2563eb"/></marker><marker id="arrow-human" viewBox="0 0 10 10" refX="9" refY="5" markerUnits="userSpaceOnUse" markerWidth="10" markerHeight="10" orient="auto-start-reverse"><path d="M0,1 L10,5 L0,9 z" fill="#16a34a"/></marker><marker id="arrow-fail" viewBox="0 0 10 10" refX="9" refY="5" markerUnits="userSpaceOnUse" markerWidth="10" markerHeight="10" orient="auto-start-reverse"><path d="M0,1 L10,5 L0,9 z" fill="#dc2626"/></marker><marker id="arrow-loop" viewBox="0 0 10 10" refX="9" refY="5" markerUnits="userSpaceOnUse" markerWidth="10" markerHeight="10" orient="auto-start-reverse"><path d="M0,1 L10,5 L0,9 z" fill="#d97706"/></marker><marker id="arrow-skip" viewBox="0 0 10 10" refX="9" refY="5" markerUnits="userSpaceOnUse" markerWidth="10" markerHeight="10" orient="auto-start-reverse"><path d="M0,1 L10,5 L0,9 z" fill="#8c959f"/></marker></defs>
+<text x="-9" y="-85" font-size="24" font-weight="bold" fill="#15803d" text-anchor="middle">@taylor/kvm-host-apply-ssh</text>
+<rect x="-312.8" y="0" width="607.6" height="312" rx="8" fill="none" stroke="#d0d7de" stroke-width="1" stroke-dasharray="4 4"/>
+<path d="M0,84 V138" fill="none" stroke="#2563eb" stroke-width="1.5" marker-end="url(#arrow-normal)"/>
+<path d="M0,176 V203 H-188 V230" fill="none" stroke="#2563eb" stroke-width="1.5" marker-end="url(#arrow-normal)"/>
+<path d="M0,176 V230" fill="none" stroke="#2563eb" stroke-width="1.5" marker-end="url(#arrow-normal)"/>
+<path d="M0,176 V203 H188 V230" fill="none" stroke="#2563eb" stroke-width="1.5" marker-end="url(#arrow-normal)"/>
+<rect x="-76" y="46" width="152" height="38" rx="4" fill="#f0fdfa" stroke="#0d9488" stroke-width="1.5"/>
+<text x="0" y="70.3" font-size="15" fill="#115e59" text-anchor="middle">uplink</text>
+<rect x="-76" y="138" width="152" height="38" rx="4" fill="#f0fdfa" stroke="#0d9488" stroke-width="1.5"/>
+<text x="0" y="162.3" font-size="15" fill="#115e59" text-anchor="middle">host</text>
+<rect x="-264" y="230" width="152" height="38" rx="4" fill="#f0fdfa" stroke="#0d9488" stroke-width="1.5"/>
+<text x="-188" y="254.3" font-size="15" fill="#115e59" text-anchor="middle">pool-default</text>
+<rect x="-76" y="230" width="152" height="38" rx="4" fill="#f0fdfa" stroke="#0d9488" stroke-width="1.5"/>
+<text x="0" y="254.3" font-size="15" fill="#115e59" text-anchor="middle">pool-iso</text>
+<rect x="112" y="230" width="152" height="38" rx="4" fill="#f0fdfa" stroke="#0d9488" stroke-width="1.5"/>
+<text x="188" y="254.3" font-size="15" fill="#115e59" text-anchor="middle">network</text>
+<text x="10" y="115" font-size="12" fill="#24292f"></text>
+<text x="-180" y="220.5" font-size="12" fill="#24292f"></text>
+<text x="10" y="207" font-size="12" fill="#24292f"></text>
+<text x="196" y="220.5" font-size="12" fill="#24292f"></text>
+<text x="92" y="69.2" font-size="12" fill="#57606a">ssh-kvm-uplink · check</text>
+<text x="92" y="161.2" font-size="12" fill="#57606a">ssh-kvm-host · apply</text>
+<text x="-188" y="284" font-size="12" fill="#57606a" text-anchor="middle">ssh-kvm-pool-default · apply</text>
+<text x="0" y="284" font-size="12" fill="#57606a" text-anchor="middle">ssh-kvm-pool-iso · apply</text>
+<text x="188" y="284" font-size="12" fill="#57606a" text-anchor="middle">ssh-kvm-network · apply</text>
+<text x="-298.8" y="22" font-size="12" fill="#57606a">kvm-host</text>
+<text x="-9" y="-60" font-size="13" fill="#57606a" text-anchor="middle">Set up a KVM host the kvm-training way over SSH, with nothing installed</text>
+<text x="-9" y="-41" font-size="13" fill="#57606a" text-anchor="middle">on the host: packages, groups, image and ISO pools, and a libvirt</text>
+<text x="-9" y="-22" font-size="13" fill="#57606a" text-anchor="middle">network on the uplink</text>
+</svg>

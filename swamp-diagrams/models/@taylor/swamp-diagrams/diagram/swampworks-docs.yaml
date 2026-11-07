@@ -5,6 +5,7 @@ name: swampworks-docs
 version: 1
 tags: {}
 globalArguments:
+  format: svg
   theme: auto
   direction: TD
   render: none

@@ -1,0 +1,11 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="-179.2 -114 586.2 246" width="587" height="246" font-family="ui-monospace, SFMono-Regular, Menlo, Consolas, 'Liberation Mono', monospace" role="img" aria-label="@taylor/kvm-vm">
+<defs><marker id="arrow-normal" viewBox="0 0 10 10" refX="9" refY="5" markerUnits="userSpaceOnUse" markerWidth="10" markerHeight="10" orient="auto-start-reverse"><path d="M0,1 L10,5 L0,9 z" fill="#2563eb"/></marker><marker id="arrow-human" viewBox="0 0 10 10" refX="9" refY="5" markerUnits="userSpaceOnUse" markerWidth="10" markerHeight="10" orient="auto-start-reverse"><path d="M0,1 L10,5 L0,9 z" fill="#16a34a"/></marker><marker id="arrow-fail" viewBox="0 0 10 10" refX="9" refY="5" markerUnits="userSpaceOnUse" markerWidth="10" markerHeight="10" orient="auto-start-reverse"><path d="M0,1 L10,5 L0,9 z" fill="#dc2626"/></marker><marker id="arrow-loop" viewBox="0 0 10 10" refX="9" refY="5" markerUnits="userSpaceOnUse" markerWidth="10" markerHeight="10" orient="auto-start-reverse"><path d="M0,1 L10,5 L0,9 z" fill="#d97706"/></marker><marker id="arrow-skip" viewBox="0 0 10 10" refX="9" refY="5" markerUnits="userSpaceOnUse" markerWidth="10" markerHeight="10" orient="auto-start-reverse"><path d="M0,1 L10,5 L0,9 z" fill="#8c959f"/></marker></defs>
+<text x="113.9" y="-66" font-size="24" font-weight="bold" fill="#15803d" text-anchor="middle">@taylor/kvm-vm</text>
+<rect x="-124.8" y="0" width="477.4" height="108" rx="8" fill="none" stroke="#d0d7de" stroke-width="1" stroke-dasharray="4 4"/>
+<rect x="-75" y="46" width="150" height="38" rx="4" fill="#f0fdfa" stroke="#0d9488" stroke-width="1.5"/>
+<text x="0" y="70.3" font-size="15" fill="#115e59" text-anchor="middle">vm</text>
+<text x="91" y="69.2" font-size="12" fill="#57606a">kvm-vm-${{ inputs.name }} · apply</text>
+<text x="-110.8" y="22" font-size="12" fill="#57606a">vm · on worker role=kvm-host</text>
+<text x="113.9" y="-41" font-size="13" fill="#57606a" text-anchor="middle">Create, start or remove an Ubuntu Server VM the kvm-training way on a</text>
+<text x="113.9" y="-22" font-size="13" fill="#57606a" text-anchor="middle">swamp worker labelled role=kvm-host</text>
+</svg>
