@@ -2,8 +2,9 @@
 
 A [swamp](https://swamp.club/) extension for GitHub repositories, through the
 [GitHub CLI](https://cli.github.com/): make sure one exists, list a user's or
-organization's repositories, and keep local copies of them up to date. It uses
-the account `gh auth login` set up, so no token goes in a vault.
+organization's repositories, browse their files without cloning, and keep local
+copies of them up to date. It uses the account `gh auth login` set up, so no
+token goes in a vault.
 
 ## Models
 
@@ -40,54 +41,79 @@ Points at a user or organization:
 | `ghPath`        | `gh`    | GitHub CLI binary                                   |
 | `gitPath`       | `git`   | git binary (2.41 or newer, for `fetch --porcelain`) |
 
-| Method | What it does                                                                                     |
-| ------ | ------------------------------------------------------------------------------------------------ |
+| Method | What it does                                                                                          |
+| ------ | ----------------------------------------------------------------------------------------------------- |
 | `list` | List the owner's repositories' SSH URLs (`git@github.com:owner/name.git`), most recently active first |
-| `sync` | Clone or update local copies of the repositories active since the last sync                      |
+| `tree` | List the files of one repository, or of every repository, optionally only those matching a glob       |
+| `read` | Read one file from one of the owner's repositories                                                    |
+| `sync` | Clone or update local copies of the repositories active since the last sync                           |
 
-A repository's activity is the latest of when it was created, last pushed to
-and last updated. Only repositories the owner owns are listed: a user's
+A repository's activity is the latest of when it was created, last pushed to and
+last updated. Only repositories the owner owns are listed: a user's
 collaborations in other accounts are left out.
 
 `list` takes an optional `days` to keep only repositories active in the last N
 days. It writes the `repos` resource (the `sshUrls` and each repository's
-details) and an `ssh-urls` text file with one URL per line.
+details: description, topics, primary language, homepage, visibility, default
+branch and dates) and an `ssh-urls` text file with one URL per line.
+
+`tree` and `read` browse files through the GitHub API, so nothing is cloned.
+`tree` takes:
+
+| Argument  | Default | Description                                                                         |
+| --------- | ------- | ----------------------------------------------------------------------------------- |
+| `repo`    |         | Repository to list; every non-empty repository when left out                        |
+| `pattern` |         | Only paths matching this glob; without a `/` it matches file names in any directory |
+| `ref`     |         | Branch, tag or commit; the default branch when left out. Only with `repo`.          |
+
+In a glob, `**` matches across directories and `*` and `?` within one; matching
+ignores case. So `slides.md` finds every `slides.md`, and `decks/**/*.md` every
+Markdown file under `decks/`. Each repository's files are written to the `tree`
+resource, instance `tree--<repo>`, with their type and size. Across every
+repository, only those with matching files are written. A repository GitHub
+truncates (over 100,000 entries) is logged as a warning.
+
+`read` takes `repo`, `path` and an optional `ref` (the default branch when left
+out), and writes the file's text to the `content` file, instance
+`file--<repo>--<path>`, with `/` and other characters a name can't hold as `-`.
+A directory, a binary file or a missing file is an error.
 
 `sync` takes:
 
-| Argument      | Default  | Description                                                                                         |
-| ------------- | -------- | --------------------------------------------------------------------------------------------------- |
-| `directory`   |          | Where the copies live; relative to the swamp repository, `~` for your home directory               |
+| Argument      | Default  | Description                                                                                            |
+| ------------- | -------- | ------------------------------------------------------------------------------------------------------ |
+| `directory`   |          | Where the copies live; relative to the swamp repository, `~` for your home directory                   |
 | `mode`        | `source` | `source`: a checkout per repository in `<name>`. `mirror`: a bare `git clone --mirror` in `<name>.git` |
-| `days`        |          | Only repositories active in the last N days                                                         |
-| `all`         | `false`  | Every repository, whatever the last sync or `days` say                                              |
-| `concurrency` | `4`      | Repositories cloned or fetched at once                                                              |
+| `days`        |          | Only repositories active in the last N days                                                            |
+| `all`         | `false`  | Every repository, whatever the last sync or `days` say                                                 |
+| `concurrency` | `4`      | Repositories cloned or fetched at once                                                                 |
 
 Without `days` or `all`, a sync takes only the repositories active since the
-last sync of the same mode into the same directory began (less ten minutes),
-so a large organization is listed but only what changed is fetched. The first
-sync takes everything. The starting point only moves forward when a sync
-succeeds for every repository and reaches back to it, so failed repositories
-are retried next time, and a narrow `days` run doesn't skip anything.
+last sync of the same mode into the same directory began (less ten minutes), so
+a large organization is listed but only what changed is fetched. The first sync
+takes everything. The starting point only moves forward when a sync succeeds for
+every repository and reaches back to it, so failed repositories are retried next
+time, and a narrow `days` run doesn't skip anything.
 
 Missing copies are cloned. Existing ones are fetched with `--prune` for
 branches; tags are fetched with `--tags --force`, so a moved tag is updated but
 a tag deleted upstream is kept. `source` checkouts are then fast-forwarded to
 their upstream branch.
 
-**Force pushes and deletions.** A dry-run fetch first lists what the fetch
-would overwrite or delete, and all of it is kept in `refs/backups/<UTC time>/...`
-refs in the local copy, in one transaction, before anything changes. If the
-backups can't be written, nothing is fetched and the repository is reported as
-failed. Backed up are:
+**Force pushes and deletions.** A dry-run fetch first lists what the fetch would
+overwrite or delete, and all of it is kept in `refs/backups/<UTC time>/...` refs
+in the local copy, in one transaction, before anything changes. If the backups
+can't be written, nothing is fetched and the repository is reported as failed.
+Backed up are:
 
-- a branch that was force-pushed or a tag that was moved upstream (`refs/backups/<time>/heads/main`
-  in a mirror, `refs/backups/<time>/remotes/origin/main` in a checkout);
+- a branch that was force-pushed or a tag that was moved upstream
+  (`refs/backups/<time>/heads/main` in a mirror,
+  `refs/backups/<time>/remotes/origin/main` in a checkout);
 - a branch deleted upstream;
 - in a checkout, the local branch, when its upstream can't be fast-forwarded:
   it's backed up to `refs/backups/<time>/heads/<branch>` and reset to the
-  upstream. If the checkout has uncommitted changes it's left alone and
-  reported as failed.
+  upstream. If the checkout has uncommitted changes it's left alone and reported
+  as failed.
 
 GitHub's own `refs/pull/*` refs are mirrored but not backed up. List or restore
 backups with git:
@@ -98,10 +124,10 @@ git branch rescued refs/backups/20261015T120000Z/heads/main
 ```
 
 Git's automatic maintenance is off during the fetch, so commits pushed between
-the dry run and the fetch can still be backed up afterwards. A repository that fails doesn't stop the
-others; each result is recorded in the `sync` resource (instance `sync-source`
-or `sync-mirror`) with what was cloned, updated, rewritten or deleted, and
-errors are logged.
+the dry run and the fetch can still be backed up afterwards. A repository that
+fails doesn't stop the others; each result is recorded in the `sync` resource
+(instance `sync-source` or `sync-mirror`) with what was cloned, updated,
+rewritten or deleted, and errors are logged.
 
 ## Usage
 
@@ -113,6 +139,10 @@ swamp model method run my-deck ensure --input description="My deck"
 
 swamp model create @taylor/github/owner systeminit --global-arg owner=systeminit
 swamp model method run systeminit list --input days=30
+swamp model method run systeminit tree --input pattern=README.md
+swamp model method run systeminit read --input repo=swamp --input path=README.md
+swamp data query 'modelName == "systeminit" && name == "file--swamp--README.md"' \
+  --select content
 swamp model method run systeminit sync --input directory=~/backup/systeminit/source
 swamp model method run systeminit sync \
   --input directory=~/backup/systeminit/mirror --input mode=mirror
@@ -128,6 +158,9 @@ gh api --method POST user/repos -f name=<name> -F private=<bool> [-f description
 gh api --method POST orgs/<owner>/repos ...               # for an organization
 
 gh api graphql -f query=... -f owner=<owner> [-f cursor=...]  # list, 100 a page
+gh api repos/<owner>/<name>                               # tree, read: the default branch
+gh api repos/<owner>/<name>/git/trees/<ref>?recursive=1   # tree
+gh api -H "Accept: application/vnd.github.raw" repos/<owner>/<name>/contents/<path>?ref=<ref>  # read
 git clone [--mirror] <sshUrl> <directory>/<name>[.git]
 git -C <copy> fetch --porcelain --prune --tags --force --no-auto-maintenance origin <refspecs> --dry-run
 git -C <copy> update-ref --stdin                          # backups, before history is lost

@@ -1,8 +1,13 @@
-import { assertEquals, assertMatch } from "jsr:@std/assert@1.0.19";
+import {
+  assertEquals,
+  assertMatch,
+  assertRejects,
+} from "jsr:@std/assert@1.0.19";
 import { createModelTestContext } from "jsr:@swamp-club/swamp-testing@0.20261008.49";
 import { type GhResult } from "./_lib/gh.ts";
 import { parseFetch, resolveDirectory } from "./_lib/git_sync.ts";
 import { model } from "./github_owner.ts";
+import { globToRegExp } from "./_lib/browse.ts";
 
 type Ctx = Parameters<typeof model.methods.sync.execute>[1];
 
@@ -300,4 +305,136 @@ Deno.test("sync with days on a fresh directory still syncs everything next time"
   } finally {
     await Deno.remove(root, { recursive: true });
   }
+});
+
+Deno.test("globToRegExp matches names anywhere and paths whole", () => {
+  const names = globToRegExp("slides.md");
+  assertEquals(names.test("slides.md"), true);
+  assertEquals(names.test("decks/caddy/SLIDES.md"), true);
+  assertEquals(names.test("myslides.md"), false);
+  const deep = globToRegExp("decks/**/*.md");
+  assertEquals(deep.test("decks/a.md"), true);
+  assertEquals(deep.test("decks/x/y/a.md"), true);
+  assertEquals(deep.test("other/decks/a.md"), false);
+  assertEquals(globToRegExp("*.md").test("a/b.md"), true);
+  assertEquals(globToRegExp("a/*.md").test("a/b/c.md"), false);
+});
+
+/** A fake gh for browsing: the repository list, then routes by API path. */
+function browseGh(routes: Record<string, GhResult>) {
+  const calls: string[][] = [];
+  const gh = (args: string[]) => {
+    calls.push(args);
+    if (args[1] === "graphql") {
+      return Promise.resolve(ok({
+        data: {
+          repositoryOwner: {
+            login: "systeminit",
+            repositories: {
+              pageInfo: { hasNextPage: false, endCursor: null },
+              nodes: [
+                node({ name: "deck", createdAt: daysAgo(1) }),
+                node({ name: "tool", createdAt: daysAgo(2) }),
+                {
+                  ...node({ name: "blank", createdAt: daysAgo(3) }),
+                  isEmpty: true,
+                },
+              ],
+            },
+          },
+        },
+      }));
+    }
+    const path = args[args.length - 1];
+    const r = routes[path];
+    if (!r) throw new Error(`unexpected gh ${args.join(" ")}`);
+    return Promise.resolve(r);
+  };
+  return { gh, calls };
+}
+
+const treeBody = (...paths: string[]) =>
+  ok({
+    truncated: false,
+    tree: paths.map((p) => ({ path: p, type: "blob", size: 10 })),
+  });
+
+async function run(
+  method: "tree" | "read",
+  routes: Record<string, GhResult>,
+  args: Record<string, unknown>,
+) {
+  const { gh, calls } = browseGh(routes);
+  const test = createModelTestContext({
+    globalArgs: model.globalArguments.parse({ owner: "systeminit" }),
+    methodName: method,
+  });
+  const m = model.methods[method];
+  await m.execute(
+    // deno-lint-ignore no-explicit-any
+    { ...(m.arguments.parse(args) as any), _gh: gh },
+    // deno-lint-ignore no-explicit-any
+    test.context as any,
+  );
+  return { calls, test };
+}
+
+Deno.test("tree across repositories keeps only those with matches", async () => {
+  const { calls, test } = await run("tree", {
+    "repos/systeminit/deck/git/trees/main?recursive=1": treeBody(
+      "slides.md",
+      "README.md",
+    ),
+    "repos/systeminit/tool/git/trees/main?recursive=1": treeBody("main.go"),
+  }, { pattern: "slides.md" });
+  const w = test.getWrittenResources();
+  assertEquals(w.length, 1);
+  assertEquals(w[0].name, "tree--deck");
+  const tree = w[0].data as Record<string, unknown>;
+  assertEquals(tree.count, 1);
+  assertEquals(
+    (tree.entries as { path: string }[]).map((e) => e.path),
+    ["slides.md"],
+  );
+  // The empty repository isn't asked for a tree.
+  assertEquals(calls.some((c) => c.join(" ").includes("blank")), false);
+});
+
+Deno.test("tree of one repository uses its default branch", async () => {
+  const { test } = await run("tree", {
+    "repos/systeminit/tool": ok({ default_branch: "trunk" }),
+    "repos/systeminit/tool/git/trees/trunk?recursive=1": treeBody("main.go"),
+  }, { repo: "tool" });
+  const tree = test.getWrittenResources()[0].data as Record<string, unknown>;
+  assertEquals(tree.ref, "trunk");
+  assertEquals(tree.count, 1);
+});
+
+Deno.test("read writes the file's text", async () => {
+  const { calls, test } = await run("read", {
+    "repos/systeminit/deck/contents/pages/caddy%20intro.md?ref=v1": {
+      code: 0,
+      stdout: "# Caddy",
+      stderr: "",
+    },
+  }, { repo: "deck", path: "pages/caddy intro.md", ref: "v1" });
+  assertEquals(calls[0].includes("Accept: application/vnd.github.raw"), true);
+  const f = test.getWrittenFiles()[0];
+  assertEquals(f.name, "file--deck--pages-caddy-intro.md");
+  assertEquals(new TextDecoder().decode(f.content as Uint8Array), "# Caddy\n");
+});
+
+Deno.test("read reports a missing file", async () => {
+  await assertRejects(
+    () =>
+      run("read", {
+        "repos/systeminit/deck/contents/nope.md?ref=main": {
+          code: 1,
+          stdout: "",
+          stderr: "gh: Not Found (HTTP 404)",
+        },
+      }, { repo: "deck", path: "nope.md", ref: "main" }),
+    Error,
+    "No file nope.md",
+  );
 });

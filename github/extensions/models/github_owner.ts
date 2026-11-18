@@ -1,6 +1,14 @@
 import { z } from "npm:zod@4";
 import { type Gh, ghRunner, parseOrThrow } from "./_lib/gh.ts";
 import {
+  defaultBranch,
+  instanceName,
+  readFile,
+  readTree,
+  type Tree,
+  TreeSchema,
+} from "./_lib/browse.ts";
+import {
   activeSince,
   daysAgo,
   gitRunner,
@@ -14,8 +22,9 @@ import {
 } from "./_lib/git_sync.ts";
 
 // All the repositories of a GitHub user or organization. `list` reports their
-// SSH URLs, newest first. `sync` keeps local copies of them; see
-// _lib/git_sync.ts.
+// SSH URLs and details, newest first. `tree` and `read` browse their files
+// through the API, without cloning; see _lib/browse.ts. `sync` keeps local
+// copies of them; see _lib/git_sync.ts.
 
 const NAME = /^[A-Za-z0-9._-]+$/;
 
@@ -39,6 +48,10 @@ const RepoEntrySchema = z.object({
   name: z.string(),
   sshUrl: z.string(),
   url: z.string(),
+  description: z.string(),
+  topics: z.array(z.string()),
+  language: z.string(),
+  homepage: z.string(),
   visibility: z.enum(["public", "private"]),
   fork: z.boolean(),
   archived: z.boolean(),
@@ -50,6 +63,28 @@ const RepoEntrySchema = z.object({
   lastActivity: z.string(),
 });
 type RepoEntry = z.infer<typeof RepoEntrySchema>;
+
+const TreeArgsSchema = z.object({
+  repo: z.string().regex(NAME).optional().describe(
+    "Repository to list the files of; every non-empty repository when left out",
+  ),
+  pattern: z.string().optional().describe(
+    "Only paths matching this glob (`**/slides.md`, `*.md`); without a `/` it matches file names in any directory",
+  ),
+  ref: z.string().optional().describe(
+    "Branch, tag or commit; the default branch when left out. Only with repo.",
+  ),
+});
+type TreeArgs = z.infer<typeof TreeArgsSchema>;
+
+const ReadArgsSchema = z.object({
+  repo: z.string().regex(NAME).describe("Repository the file is in"),
+  path: z.string().min(1).describe("Path of the file in the repository"),
+  ref: z.string().optional().describe(
+    "Branch, tag or commit; the default branch when left out",
+  ),
+});
+type ReadArgs = z.infer<typeof ReadArgsSchema>;
 
 const ReposSchema = z.object({
   owner: z.string(),
@@ -75,7 +110,9 @@ const QUERY = `query($owner: String!, $cursor: String) {
     repositories(first: 100, after: $cursor, orderBy: {field: CREATED_AT, direction: DESC}) {
       pageInfo { hasNextPage endCursor }
       nodes {
-        name owner { login } sshUrl url isPrivate isFork isArchived isEmpty
+        name owner { login } sshUrl url description homepageUrl
+        primaryLanguage { name } repositoryTopics(first: 20) { nodes { topic { name } } }
+        isPrivate isFork isArchived isEmpty
         createdAt updatedAt pushedAt defaultBranchRef { name }
       }
     }
@@ -116,6 +153,13 @@ export async function listRepos(gh: Gh, owner: string): Promise<RepoEntry[]> {
         name: String(n.name),
         sshUrl: String(n.sshUrl),
         url: String(n.url),
+        description: String(n.description ?? ""),
+        // deno-lint-ignore no-explicit-any
+        topics: ((n.repositoryTopics?.nodes ?? []) as any[]).map((t) =>
+          String(t.topic?.name)
+        ),
+        language: String(n.primaryLanguage?.name ?? ""),
+        homepage: String(n.homepageUrl ?? ""),
         visibility: n.isPrivate ? "private" : "public",
         fork: Boolean(n.isFork),
         archived: Boolean(n.isArchived),
@@ -135,7 +179,7 @@ export async function listRepos(gh: Gh, owner: string): Promise<RepoEntry[]> {
 /** The `@taylor/github/owner` swamp model type. */
 export const model = {
   type: "@taylor/github/owner",
-  version: "2026.10.22.1",
+  version: "2026.11.18.1",
   globalArguments: GlobalArgsSchema,
   upgrades: [
     {
@@ -148,6 +192,12 @@ export const model = {
       description: "Relicenses under AGPL-3.0-or-later; no settings changed",
       upgradeAttributes: (old: Record<string, unknown>) => old,
     },
+    {
+      toVersion: "2026.11.18.1",
+      description:
+        "Adds the tree and read methods and repository details to list; no settings changed",
+      upgradeAttributes: (old: Record<string, unknown>) => old,
+    },
   ],
   resources: {
     repos: {
@@ -157,12 +207,26 @@ export const model = {
       lifetime: "infinite",
       garbageCollection: 10,
     },
+    tree: {
+      description:
+        "A repository's files at a ref, optionally filtered by a glob (instance tree--<repo>)",
+      schema: TreeSchema,
+      lifetime: "infinite",
+      garbageCollection: 10,
+    },
     sync: syncResource,
   },
   files: {
     sshUrls: {
       description:
         "The listed repositories' SSH URLs, one per line, newest first (instance ssh-urls)",
+      contentType: "text/plain",
+      lifetime: "infinite",
+      garbageCollection: 10,
+    },
+    content: {
+      description:
+        "One file read from a repository (instance file--<repo>--<path>)",
       contentType: "text/plain",
       lifetime: "infinite",
       garbageCollection: 10,
@@ -196,6 +260,99 @@ export const model = {
         const file = await context.createFileWriter("sshUrls", "ssh-urls")
           .writeText(sshUrls.map((u) => `${u}\n`).join(""));
         return { dataHandles: [handle, file] };
+      },
+    },
+    tree: {
+      description:
+        "List the files of one repository, or of every repository, optionally only those matching a glob",
+      arguments: TreeArgsSchema,
+      execute: async (args: TreeArgs & { _gh?: Gh }, context: Context) => {
+        const g = context.globalArgs;
+        const gh = args._gh ?? ghRunner(g.ghPath);
+        if (args.ref && !args.repo) {
+          throw new Error("ref needs repo: other repositories lack that ref");
+        }
+        const targets: { name: string; ref: string }[] = args.repo
+          ? [{
+            name: args.repo,
+            ref: args.ref ?? await defaultBranch(gh, g.owner, args.repo),
+          }]
+          : (await listRepos(gh, g.owner))
+            .filter((r) => !r.empty && r.defaultBranch)
+            .map((r) => ({ name: r.name, ref: r.defaultBranch }));
+        const handles = [];
+        let failed = 0;
+        for (const t of targets) {
+          let tree: Tree;
+          try {
+            // An empty repository has no default branch; HEAD reads as empty.
+            tree = await readTree(
+              gh,
+              g.owner,
+              t.name,
+              t.ref || "HEAD",
+              args.pattern,
+            );
+          } catch (err) {
+            failed++;
+            context.logger.error("{repo}: {error}", {
+              repo: t.name,
+              error: (err as Error).message,
+            });
+            continue;
+          }
+          if (tree.truncated) {
+            context.logger.warn(
+              "{repo}: GitHub truncated the tree; some files are missing",
+              { repo: t.name },
+            );
+          }
+          // Across every repository, only the ones with matches are kept.
+          if (!args.repo && tree.count === 0) continue;
+          for (const e of tree.entries) {
+            context.logger.info("{repo}/{path}", {
+              repo: t.name,
+              path: e.path,
+            });
+          }
+          handles.push(
+            await context.writeResource(
+              "tree",
+              instanceName("tree", t.name),
+              tree,
+            ),
+          );
+        }
+        context.logger.info(
+          "{matched} of {total} repositories of {owner} have matching files",
+          { matched: handles.length, total: targets.length, owner: g.owner },
+        );
+        if (failed === targets.length && failed > 0) {
+          throw new Error(`Listing files failed for every repository`);
+        }
+        return { dataHandles: handles };
+      },
+    },
+    read: {
+      description: "Read one file from one of the owner's repositories",
+      arguments: ReadArgsSchema,
+      execute: async (args: ReadArgs & { _gh?: Gh }, context: Context) => {
+        const g = context.globalArgs;
+        const gh = args._gh ?? ghRunner(g.ghPath);
+        const ref = args.ref ?? await defaultBranch(gh, g.owner, args.repo);
+        if (!ref) throw new Error(`${g.owner}/${args.repo} is empty`);
+        const text = await readFile(gh, g.owner, args.repo, args.path, ref);
+        context.logger.info("Read {path} from {repo} at {ref}: {bytes} bytes", {
+          path: args.path,
+          repo: args.repo,
+          ref,
+          bytes: new TextEncoder().encode(text).length,
+        });
+        const file = await context.createFileWriter(
+          "content",
+          instanceName("file", args.repo, args.path),
+        ).writeText(text.endsWith("\n") ? text : `${text}\n`);
+        return { dataHandles: [file] };
       },
     },
     sync: {
