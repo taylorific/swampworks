@@ -8,11 +8,14 @@ export type GhResult = RunResult;
 /** Runs `gh` with the given arguments. Injectable for tests. */
 export type Gh = Run;
 
-/** Runs the GitHub CLI and captures its output. */
-export function ghRunner(bin: string): Gh {
+/**
+ * Runs the GitHub CLI and captures its output, trimmed unless `trim` is false.
+ */
+export function ghRunner(bin: string, opts: { trim?: boolean } = {}): Gh {
   return commandRunner(bin, {
     timeoutMs: 60000,
     hint: "Install the GitHub CLI and run `gh auth login`.",
+    trim: opts.trim,
   });
 }
 

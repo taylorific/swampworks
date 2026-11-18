@@ -108,7 +108,10 @@ export async function readTree(
   };
 }
 
-/** One file's contents at `ref`, as text. */
+/**
+ * One file's contents at `ref`, as text. `gh` must not trim its output, or
+ * leading indentation and blank lines are lost.
+ */
 export async function readFile(
   gh: Gh,
   owner: string,

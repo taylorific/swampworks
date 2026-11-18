@@ -13,10 +13,18 @@ export interface RunResult {
  */
 export type Run = (args: string[], input?: string) => Promise<RunResult>;
 
-/** Runs `bin` and captures its output. */
+/**
+ * Runs `bin` and captures its output. Output is trimmed unless `trim` is
+ * false, for callers that need it byte for byte, such as a file's contents.
+ */
 export function commandRunner(
   bin: string,
-  opts: { timeoutMs: number; hint: string; env?: Record<string, string> },
+  opts: {
+    timeoutMs: number;
+    hint: string;
+    env?: Record<string, string>;
+    trim?: boolean;
+  },
 ): Run {
   return async (args, input) => {
     let out: Deno.CommandOutput;
@@ -42,9 +50,10 @@ export function commandRunner(
       );
     }
     const dec = new TextDecoder();
+    const stdout = dec.decode(out.stdout);
     return {
       code: out.code,
-      stdout: dec.decode(out.stdout).trim(),
+      stdout: opts.trim === false ? stdout : stdout.trim(),
       stderr: dec.decode(out.stderr).trim(),
     };
   };

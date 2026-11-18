@@ -338,7 +338,8 @@ export const model = {
       arguments: ReadArgsSchema,
       execute: async (args: ReadArgs & { _gh?: Gh }, context: Context) => {
         const g = context.globalArgs;
-        const gh = args._gh ?? ghRunner(g.ghPath);
+        // Untrimmed, so the file is saved exactly as it is in the repository.
+        const gh = args._gh ?? ghRunner(g.ghPath, { trim: false });
         const ref = args.ref ?? await defaultBranch(gh, g.owner, args.repo);
         if (!ref) throw new Error(`${g.owner}/${args.repo} is empty`);
         const text = await readFile(gh, g.owner, args.repo, args.path, ref);
@@ -351,7 +352,7 @@ export const model = {
         const file = await context.createFileWriter(
           "content",
           instanceName("file", args.repo, args.path),
-        ).writeText(text.endsWith("\n") ? text : `${text}\n`);
+        ).writeText(text);
         return { dataHandles: [file] };
       },
     },

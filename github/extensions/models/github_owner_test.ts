@@ -414,14 +414,17 @@ Deno.test("read writes the file's text", async () => {
   const { calls, test } = await run("read", {
     "repos/systeminit/deck/contents/pages/caddy%20intro.md?ref=v1": {
       code: 0,
-      stdout: "# Caddy",
+      stdout: "\n  indented: true\n# Caddy",
       stderr: "",
     },
   }, { repo: "deck", path: "pages/caddy intro.md", ref: "v1" });
   assertEquals(calls[0].includes("Accept: application/vnd.github.raw"), true);
   const f = test.getWrittenFiles()[0];
   assertEquals(f.name, "file--deck--pages-caddy-intro.md");
-  assertEquals(new TextDecoder().decode(f.content as Uint8Array), "# Caddy\n");
+  assertEquals(
+    new TextDecoder().decode(f.content as Uint8Array),
+    "\n  indented: true\n# Caddy",
+  );
 });
 
 Deno.test("read reports a missing file", async () => {
