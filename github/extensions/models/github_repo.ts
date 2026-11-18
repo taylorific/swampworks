@@ -84,7 +84,7 @@ function toRepo(
 /** The `@taylor/github/repo` swamp model type. */
 export const model = {
   type: "@taylor/github/repo",
-  version: "2026.10.22.1",
+  version: "2026.11.18.1",
   globalArguments: GlobalArgsSchema,
   upgrades: [
     {
@@ -100,6 +100,11 @@ export const model = {
     {
       toVersion: "2026.10.22.1",
       description: "Relicenses under AGPL-3.0-or-later; no settings changed",
+      upgradeAttributes: (old: Record<string, unknown>) => old,
+    },
+    {
+      toVersion: "2026.11.18.1",
+      description: "Version aligned with the manifest; no settings changed",
       upgradeAttributes: (old: Record<string, unknown>) => old,
     },
   ],

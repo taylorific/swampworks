@@ -1,8 +1,8 @@
 manifestVersion: 1
 name: "@taylor/github"
-version: "2026.10.22.1"
+version: "2026.11.18.1"
 license: AGPL-3.0-or-later
-description: "Make sure a GitHub repository exists, list a user's or organization's repositories newest first, and keep local source checkouts or mirrors of them up to date, syncing only what changed since last time and keeping force-pushed history in backup refs. Uses the GitHub CLI's existing login, so no token goes in a vault."
+description: "Make sure a GitHub repository exists, list a user's or organization's repositories newest first, browse their files without cloning, and keep local source checkouts or mirrors of them up to date, syncing only what changed since last time and keeping force-pushed history in backup refs. Uses the GitHub CLI's existing login, so no token goes in a vault."
 repository: "https://github.com/taylorific/swampworks"
 models:
   - github_repo.ts
